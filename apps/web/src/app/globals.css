@@ -1,0 +1,102 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* Light mode (not primary, but supported) */
+    --background: 0 0% 100%;
+    --foreground: 240 10% 4%;
+    --card: 0 0% 98%;
+    --card-foreground: 240 10% 4%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 240 10% 4%;
+    --primary: 243 75% 59%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 240 5% 96%;
+    --secondary-foreground: 240 6% 10%;
+    --muted: 240 5% 94%;
+    --muted-foreground: 240 4% 46%;
+    --accent: 240 5% 94%;
+    --accent-foreground: 240 6% 10%;
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 240 6% 90%;
+    --input: 240 6% 90%;
+    --ring: 243 75% 59%;
+    --radius: 0.5rem;
+  }
+
+  .dark {
+    /* Dark mode — primary design target */
+    --background: 240 10% 4%;      /* #09090b — near black */
+    --foreground: 240 5% 90%;      /* #e4e4e7 — near white */
+    --card: 240 6% 7%;             /* #111113 — slightly lighter surface */
+    --card-foreground: 240 5% 90%;
+    --popover: 240 6% 7%;
+    --popover-foreground: 240 5% 90%;
+    --primary: 243 75% 62%;        /* #6366f1 — indigo */
+    --primary-foreground: 0 0% 100%;
+    --secondary: 240 4% 12%;       /* #1c1c1f — elevated surface */
+    --secondary-foreground: 240 5% 80%;
+    --muted: 240 4% 12%;
+    --muted-foreground: 240 5% 45%; /* #6b7280 — subdued text */
+    --accent: 240 4% 14%;
+    --accent-foreground: 240 5% 85%;
+    --destructive: 0 72% 51%;      /* #dc2626 */
+    --destructive-foreground: 0 0% 100%;
+    --border: 240 4% 14%;          /* #1c1c1f — subtle borders */
+    --input: 240 4% 14%;
+    --ring: 243 75% 62%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+    font-feature-settings: 'rlig' 1, 'calt' 1;
+  }
+
+  /* Scrollbar styling for dark theme */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    @apply bg-transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    @apply bg-border rounded-full;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-muted-foreground/30;
+  }
+}
+
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
+
+  /* Status indicator dot */
+  .status-dot {
+    @apply inline-block w-2 h-2 rounded-full;
+  }
+
+  /* Kanban card hover state */
+  .task-card {
+    @apply bg-card border border-border rounded-lg p-3 cursor-pointer
+           transition-all duration-150 hover:border-primary/30 hover:bg-accent
+           hover:shadow-lg hover:shadow-black/20;
+  }
+
+  /* Priority color dots using CSS custom properties set by JS */
+  .priority-dot {
+    @apply inline-block w-2 h-2 rounded-full flex-shrink-0;
+  }
+}

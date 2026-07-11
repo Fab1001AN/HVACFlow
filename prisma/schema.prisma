@@ -1,0 +1,550 @@
+// HVACFlow — Prisma Schema
+// Version 2.0 — Full Configurability Edition
+// PostgreSQL 16
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── Fixed Engine Enums ───────────────────────────────────────────────────────
+// These are the ONLY fixed values in the system.
+// Everything else is configurable data in tables.
+
+enum TaskStatus {
+  Pending
+  Ready
+  InProgress
+  PendingVerification
+  Completed
+  OnHold
+  Rejected
+}
+
+enum OrderStatus {
+  Draft
+  Confirmed
+  InProduction
+  Completed
+  Cancelled
+}
+
+enum UnitStatus {
+  Planned
+  InProgress
+  Completed
+  OnHold
+  Dispatched
+}
+
+enum PartStatus {
+  Pending
+  InProgress
+  Completed
+  OnHold
+  Rejected
+}
+
+enum AppliesTo {
+  PART
+  UNIT
+}
+
+enum RouteTargetType {
+  UNIT_TYPE
+  PART_TYPE
+}
+
+// ─── Identity & Access ────────────────────────────────────────────────────────
+
+model User {
+  id           String    @id @default(uuid())
+  email        String    @unique
+  name         String
+  passwordHash String
+  isActive     Boolean   @default(true)
+  lastLoginAt  DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  deletedAt    DateTime?
+
+  roles                   UserRole[]
+  departments             UserDepartment[]
+  preferences             UserPreference?
+  assignedTasks           ProductionTask[]    @relation("AssignedUser")
+  verifiedTasks           ProductionTask[]    @relation("VerifiedByUser")
+  createdTasks            ProductionTask[]    @relation("CreatedByUser")
+  updatedTasks            ProductionTask[]    @relation("UpdatedByUser")
+  taskStatusChanges       TaskStatusHistory[]
+  checklistCompletions    ChecklistResponse[]
+  createdUnits            Unit[]
+  createdParts            Part[]
+
+  @@map("users")
+}
+
+model Role {
+  id          String   @id @default(uuid())
+  name        String   @unique
+  description String?
+  isSystem    Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  permissions      RolePermission[]
+  users            UserRole[]
+  dashboardConfig  RoleDashboardConfig?
+
+  @@map("roles")
+}
+
+model Permission {
+  id          String @id @default(uuid())
+  code        String @unique
+  description String?
+  category    String
+
+  roles RolePermission[]
+
+  @@map("permissions")
+}
+
+model RolePermission {
+  roleId       String
+  permissionId String
+
+  role       Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, permissionId])
+  @@map("role_permissions")
+}
+
+model UserRole {
+  userId String
+  roleId String
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role Role @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@id([userId, roleId])
+  @@map("user_roles")
+}
+
+model UserDepartment {
+  userId       String
+  departmentId String
+  isPrimary    Boolean @default(false)
+
+  user       User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  department Department @relation(fields: [departmentId], references: [id], onDelete: Cascade)
+
+  @@id([userId, departmentId])
+  @@map("user_departments")
+}
+
+// ─── Configurable Priority Levels ────────────────────────────────────────────
+// Replaces the hardcoded Low/Normal/High/Urgent enum.
+// All priority dropdowns in the application read from this table.
+
+model PriorityLevel {
+  id        String  @id @default(uuid())
+  name      String  @unique
+  color     String?
+  sortOrder Int
+  isDefault Boolean @default(false)
+  isActive  Boolean @default(true)
+
+  orders            Order[]
+  tasks             ProductionTask[]
+  processDefaults   ProcessDefinition[]
+
+  @@map("priority_levels")
+}
+
+// ─── Manufacturing Hierarchy ──────────────────────────────────────────────────
+
+model Customer {
+  id          String    @id @default(uuid())
+  name        String
+  code        String    @unique
+  contactInfo Json?
+  isActive    Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
+
+  projects Project[]
+
+  @@map("customers")
+}
+
+model Project {
+  id            String    @id @default(uuid())
+  customerId    String
+  name          String
+  code          String    @unique
+  startDate     DateTime?
+  targetEndDate DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  deletedAt     DateTime?
+
+  customer Customer @relation(fields: [customerId], references: [id])
+  orders   Order[]
+
+  @@index([customerId])
+  @@map("projects")
+}
+
+model Order {
+  id                    String      @id @default(uuid())
+  projectId             String
+  orderNumber           String      @unique
+  priorityLevelId       String
+  status                OrderStatus @default(Draft)
+  requestedDeliveryDate DateTime?
+  notes                 String?
+  createdAt             DateTime    @default(now())
+  updatedAt             DateTime    @updatedAt
+  deletedAt             DateTime?
+
+  project       Project       @relation(fields: [projectId], references: [id])
+  priorityLevel PriorityLevel @relation(fields: [priorityLevelId], references: [id])
+  units         Unit[]
+
+  @@index([projectId])
+  @@index([status])
+  @@map("orders")
+}
+
+// ─── Configurable Type Catalogs ───────────────────────────────────────────────
+
+model UnitType {
+  id        String  @id @default(uuid())
+  name      String
+  code      String  @unique
+  isActive  Boolean @default(true)
+
+  units        Unit[]
+  processRoutes ProcessRoute[]
+  composition   UnitTypeComposition[]
+
+  @@map("unit_types")
+}
+
+model PartType {
+  id       String  @id @default(uuid())
+  name     String
+  code     String  @unique
+  isActive Boolean @default(true)
+
+  parts         Part[]
+  processRoutes ProcessRoute[]
+  compositions  UnitTypeComposition[]
+
+  @@map("part_types")
+}
+
+// ─── Unit Composition — defines which PartTypes belong to each UnitType ───────
+
+model UnitTypeComposition {
+  id              String  @id @default(uuid())
+  unitTypeId      String
+  partTypeId      String
+  defaultQuantity Int     @default(1)
+  isOptional      Boolean @default(false)
+  sortOrder       Int     @default(0)
+  isActive        Boolean @default(true)
+
+  unitType UnitType @relation(fields: [unitTypeId], references: [id])
+  partType PartType @relation(fields: [partTypeId], references: [id])
+
+  @@unique([unitTypeId, partTypeId])
+  @@index([unitTypeId])
+  @@map("unit_type_compositions")
+}
+
+model Unit {
+  id                 String     @id @default(uuid())
+  orderId            String
+  unitTypeId         String
+  serialNumber       String     @unique
+  specifications     Json?
+  progressPercentage Decimal    @default(0) @db.Decimal(5, 2)
+  status             UnitStatus @default(Planned)
+  createdByUserId    String
+  createdAt          DateTime   @default(now())
+  updatedAt          DateTime   @updatedAt
+  deletedAt          DateTime?
+
+  order           Order            @relation(fields: [orderId], references: [id])
+  unitType        UnitType         @relation(fields: [unitTypeId], references: [id])
+  createdBy       User             @relation(fields: [createdByUserId], references: [id])
+  parts           Part[]
+  tasks           ProductionTask[] @relation("UnitTasks")
+
+  @@index([orderId])
+  @@index([status])
+  @@map("units")
+}
+
+model Part {
+  id                 String     @id @default(uuid())
+  unitId             String
+  partTypeId         String
+  identifier         String
+  quantity           Int        @default(1)
+  specifications     Json?
+  progressPercentage Decimal    @default(0) @db.Decimal(5, 2)
+  status             PartStatus @default(Pending)
+  createdByUserId    String
+  createdAt          DateTime   @default(now())
+  updatedAt          DateTime   @updatedAt
+  deletedAt          DateTime?
+
+  unit      Unit             @relation(fields: [unitId], references: [id])
+  partType  PartType         @relation(fields: [partTypeId], references: [id])
+  createdBy User             @relation(fields: [createdByUserId], references: [id])
+  tasks     ProductionTask[] @relation("PartTasks")
+
+  @@unique([unitId, identifier])
+  @@index([unitId])
+  @@index([status])
+  @@map("parts")
+}
+
+// ─── Configuration — Departments, Processes, Routes ──────────────────────────
+
+model Department {
+  id        String  @id @default(uuid())
+  name      String  @unique
+  code      String  @unique
+  color     String?
+  sortOrder Int     @default(0)
+  isActive  Boolean @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  users              UserDepartment[]
+  processDefinitions ProcessDefinition[]
+  machines           Machine[]
+  tasks              ProductionTask[]
+
+  @@map("departments")
+}
+
+model ProcessDefinition {
+  id                       String     @id @default(uuid())
+  departmentId             String
+  name                     String     @unique
+  code                     String     @unique
+  appliesTo                AppliesTo
+  requiresChecklist        Boolean    @default(false)
+  requiresVerification     Boolean    @default(false)
+  defaultEstimatedMinutes  Int?
+  defaultPriorityLevelId   String?
+  weight                   Decimal    @default(1.0) @db.Decimal(5, 2)
+  isActive                 Boolean    @default(true)
+  createdAt                DateTime   @default(now())
+  updatedAt                DateTime   @updatedAt
+
+  department           Department         @relation(fields: [departmentId], references: [id])
+  defaultPriorityLevel PriorityLevel?     @relation(fields: [defaultPriorityLevelId], references: [id])
+  processRoutes        ProcessRoute[]
+  tasks                ProductionTask[]
+  checklistTemplates   ChecklistTemplate[]
+
+  @@index([departmentId])
+  @@map("process_definitions")
+}
+
+model ProcessRoute {
+  id                  String          @id @default(uuid())
+  targetType          RouteTargetType
+  unitTypeId          String?
+  partTypeId          String?
+  processDefinitionId String
+  sequenceOrder       Int
+  isOptional          Boolean         @default(false)
+  isActive            Boolean         @default(true)
+
+  unitType          UnitType?         @relation(fields: [unitTypeId], references: [id])
+  partType          PartType?         @relation(fields: [partTypeId], references: [id])
+  processDefinition ProcessDefinition @relation(fields: [processDefinitionId], references: [id])
+
+  @@index([unitTypeId])
+  @@index([partTypeId])
+  @@index([processDefinitionId])
+  @@map("process_routes")
+}
+
+model Machine {
+  id           String  @id @default(uuid())
+  departmentId String
+  name         String
+  code         String  @unique
+  isActive     Boolean @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  department Department       @relation(fields: [departmentId], references: [id])
+  tasks      ProductionTask[]
+
+  @@index([departmentId])
+  @@map("machines")
+}
+
+// ─── Checklists ───────────────────────────────────────────────────────────────
+
+model ChecklistTemplate {
+  id                  String  @id @default(uuid())
+  processDefinitionId String
+  name                String
+  isActive            Boolean @default(true)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  processDefinition ProcessDefinition      @relation(fields: [processDefinitionId], references: [id])
+  items             ChecklistItemTemplate[]
+
+  @@map("checklist_templates")
+}
+
+model ChecklistItemTemplate {
+  id                  String  @id @default(uuid())
+  checklistTemplateId String
+  label               String
+  sortOrder           Int     @default(0)
+  isRequired          Boolean @default(true)
+
+  checklistTemplate ChecklistTemplate   @relation(fields: [checklistTemplateId], references: [id])
+  responses         ChecklistResponse[]
+
+  @@map("checklist_item_templates")
+}
+
+model ChecklistResponse {
+  id                      String    @id @default(uuid())
+  productionTaskId        String
+  checklistItemTemplateId String
+  isChecked               Boolean   @default(false)
+  completedByUserId       String?
+  completedAt             DateTime?
+
+  productionTask       ProductionTask        @relation(fields: [productionTaskId], references: [id], onDelete: Cascade)
+  checklistItemTemplate ChecklistItemTemplate @relation(fields: [checklistItemTemplateId], references: [id])
+  completedBy          User?                 @relation(fields: [completedByUserId], references: [id])
+
+  @@unique([productionTaskId, checklistItemTemplateId])
+  @@index([productionTaskId])
+  @@map("checklist_responses")
+}
+
+// ─── Production Task Engine ───────────────────────────────────────────────────
+// Single universal table for every manufacturing operation.
+
+model ProductionTask {
+  id                      String     @id @default(uuid())
+  partId                  String?
+  unitId                  String?
+  departmentId            String
+  processDefinitionId     String
+  sequenceOrder           Int
+  parentTaskId            String?
+  nextTaskId              String?
+  status                  TaskStatus @default(Pending)
+  priorityLevelId         String
+  assignedUserId          String?
+  verifiedByUserId        String?
+  machineId               String?
+  estimatedDurationMinutes Int?
+  actualDurationMinutes   Int?
+  startedAt               DateTime?
+  completedAt             DateTime?
+  verifiedAt              DateTime?
+  notes                   String?
+  createdByUserId         String
+  updatedByUserId         String
+  createdAt               DateTime   @default(now())
+  updatedAt               DateTime   @updatedAt
+
+  // Hierarchy relations
+  part  Part? @relation("PartTasks", fields: [partId], references: [id])
+  unit  Unit? @relation("UnitTasks", fields: [unitId], references: [id])
+
+  // Config relations
+  department        Department        @relation(fields: [departmentId], references: [id])
+  processDefinition ProcessDefinition @relation(fields: [processDefinitionId], references: [id])
+  priorityLevel     PriorityLevel     @relation(fields: [priorityLevelId], references: [id])
+  machine           Machine?          @relation(fields: [machineId], references: [id])
+
+  // User relations
+  assignedUser   User? @relation("AssignedUser", fields: [assignedUserId], references: [id])
+  verifiedByUser User? @relation("VerifiedByUser", fields: [verifiedByUserId], references: [id])
+  createdBy      User  @relation("CreatedByUser", fields: [createdByUserId], references: [id])
+  updatedBy      User  @relation("UpdatedByUser", fields: [updatedByUserId], references: [id])
+
+  // Self-referencing task graph
+  parentTask ProductionTask?  @relation("TaskParent", fields: [parentTaskId], references: [id])
+  childTasks ProductionTask[] @relation("TaskParent")
+  nextTask   ProductionTask?  @relation("TaskSequence", fields: [nextTaskId], references: [id])
+  prevTasks  ProductionTask[] @relation("TaskSequence")
+
+  // Sub-entities
+  statusHistory     TaskStatusHistory[]
+  checklistResponses ChecklistResponse[]
+
+  @@index([departmentId, status])
+  @@index([partId])
+  @@index([unitId])
+  @@index([assignedUserId, status])
+  @@index([parentTaskId])
+  @@index([nextTaskId])
+  @@index([status, priorityLevelId])
+  @@map("production_tasks")
+}
+
+model TaskStatusHistory {
+  id               String     @id @default(uuid())
+  productionTaskId String
+  fromStatus       TaskStatus?
+  toStatus         TaskStatus
+  changedByUserId  String
+  changedAt        DateTime   @default(now())
+  note             String?
+
+  productionTask ProductionTask @relation(fields: [productionTaskId], references: [id], onDelete: Cascade)
+  changedBy      User           @relation(fields: [changedByUserId], references: [id])
+
+  @@index([productionTaskId, changedAt])
+  @@map("task_status_history")
+}
+
+// ─── Dashboard Configuration ──────────────────────────────────────────────────
+
+model UserPreference {
+  id          String   @id @default(uuid())
+  userId      String   @unique
+  preferences Json     @default("{}")
+  updatedAt   DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("user_preferences")
+}
+
+model RoleDashboardConfig {
+  id        String   @id @default(uuid())
+  roleId    String   @unique
+  config    Json     @default("{}")
+  updatedAt DateTime @updatedAt
+
+  role Role @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@map("role_dashboard_configs")
+}

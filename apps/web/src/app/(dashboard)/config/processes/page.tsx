@@ -1,0 +1,224 @@
+'use client';
+
+import { useState } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { api } from '@/lib/api';
+import { PageHeader, Button, Modal, Input, Select, EmptyState, Spinner, Card } from '@/components/shared';
+import { Plus, Pencil, Trash2, Cpu, CheckSquare, Shield } from 'lucide-react';
+import { toast } from '@/components/shared';
+import { cn } from '@/lib/utils';
+import { AppliesTo } from '@hvacflow/shared-types';
+
+const EMPTY_FORM = {
+  name: '', code: '', departmentId: '', appliesTo: AppliesTo.PART as AppliesTo,
+  requiresChecklist: false, requiresVerification: false,
+  defaultEstimatedMinutes: '', defaultPriorityLevelId: '', weight: '1.0',
+};
+
+export default function ProcessesConfigPage() {
+  const queryClient = useQueryClient();
+  const [modalOpen, setModalOpen] = useState(false);
+  const [editing, setEditing] = useState<any>(null);
+  const [form, setForm] = useState({ ...EMPTY_FORM });
+
+  const { data: processes = [], isLoading } = useQuery({
+    queryKey: ['process-definitions'],
+    queryFn: () => api.processDefinitions.list(),
+  });
+
+  const { data: departments = [] } = useQuery({
+    queryKey: ['departments'],
+    queryFn: () => api.departments.list({ isActive: true }),
+    staleTime: Infinity,
+  });
+
+  const { data: priorities = [] } = useQuery({
+    queryKey: ['priority-levels'],
+    queryFn: () => api.priorityLevels.list({ isActive: true }),
+    staleTime: Infinity,
+  });
+
+  const saveMutation = useMutation({
+    mutationFn: (body: any) => editing
+      ? api.processDefinitions.update(editing.id, body)
+      : api.processDefinitions.create(body),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['process-definitions'] });
+      setModalOpen(false);
+      setEditing(null);
+      setForm({ ...EMPTY_FORM });
+      toast(editing ? 'Process updated' : 'Process created', 'success');
+    },
+    onError: (err: any) => toast(err.message, 'error'),
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) => api.processDefinitions.delete(id),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['process-definitions'] }); toast('Process deleted', 'success'); },
+    onError: (err: any) => toast(err.message, 'error'),
+  });
+
+  const openCreate = () => { setEditing(null); setForm({ ...EMPTY_FORM }); setModalOpen(true); };
+  const openEdit = (proc: any) => {
+    setEditing(proc);
+    setForm({
+      name: proc.name, code: proc.code, departmentId: proc.departmentId,
+      appliesTo: proc.appliesTo, requiresChecklist: proc.requiresChecklist,
+      requiresVerification: proc.requiresVerification,
+      defaultEstimatedMinutes: proc.defaultEstimatedMinutes?.toString() ?? '',
+      defaultPriorityLevelId: proc.defaultPriorityLevelId ?? '',
+      weight: proc.weight?.toString() ?? '1.0',
+    });
+    setModalOpen(true);
+  };
+
+  const handleSubmit = () => {
+    saveMutation.mutate({
+      ...form,
+      defaultEstimatedMinutes: form.defaultEstimatedMinutes ? parseInt(form.defaultEstimatedMinutes) : undefined,
+      defaultPriorityLevelId: form.defaultPriorityLevelId || undefined,
+      weight: parseFloat(form.weight) || 1.0,
+    });
+  };
+
+  // Group by department
+  const grouped = (processes as any[]).reduce((acc: Record<string, any[]>, proc: any) => {
+    const deptName = proc.department?.name ?? 'Unassigned';
+    if (!acc[deptName]) acc[deptName] = [];
+    acc[deptName].push(proc);
+    return acc;
+  }, {});
+
+  return (
+    <div className="flex flex-col h-full">
+      <PageHeader
+        title="Process Definitions"
+        description="Every manufacturing operation. No process names are hardcoded — add any new process here."
+        action={<Button leftIcon={<Plus className="w-3.5 h-3.5" />} onClick={openCreate}>New Process</Button>}
+      />
+
+      <div className="flex-1 overflow-y-auto p-6 space-y-6">
+        {isLoading ? (
+          <div className="flex items-center justify-center h-48"><Spinner className="w-6 h-6" /></div>
+        ) : Object.keys(grouped).length === 0 ? (
+          <EmptyState title="No processes yet" icon={<Cpu className="w-10 h-10" />}
+            action={<Button leftIcon={<Plus className="w-3.5 h-3.5" />} onClick={openCreate}>New Process</Button>}
+          />
+        ) : (
+          Object.entries(grouped).map(([deptName, procs]) => (
+            <div key={deptName}>
+              <h3 className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-2 px-1">{deptName}</h3>
+              <Card className="overflow-hidden">
+                <table className="w-full text-sm">
+                  <thead className="bg-secondary border-b border-border">
+                    <tr>
+                      <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground">Name</th>
+                      <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground">Applies To</th>
+                      <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground">Verify</th>
+                      <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground">Checklist</th>
+                      <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground">Weight</th>
+                      <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground">Est.</th>
+                      <th className="w-20" />
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border">
+                    {(procs as any[]).map((proc) => (
+                      <tr key={proc.id} className="hover:bg-accent/50 group">
+                        <td className="px-4 py-2.5">
+                          <div className="flex items-center gap-2">
+                            <span className={cn('w-1.5 h-1.5 rounded-full', proc.isActive ? 'bg-green-400' : 'bg-muted-foreground')} />
+                            <span className="font-medium text-foreground">{proc.name}</span>
+                            <span className="text-xs text-muted-foreground font-mono">{proc.code}</span>
+                          </div>
+                        </td>
+                        <td className="px-4 py-2.5">
+                          <span className={cn('inline-flex items-center rounded px-1.5 py-0.5 text-xs font-medium',
+                            proc.appliesTo === 'PART' ? 'bg-blue-500/10 text-blue-400' : 'bg-violet-500/10 text-violet-400'
+                          )}>
+                            {proc.appliesTo}
+                          </span>
+                        </td>
+                        <td className="px-4 py-2.5 text-center">
+                          {proc.requiresVerification ? <Shield className="w-3.5 h-3.5 text-orange-400 mx-auto" /> : <span className="text-muted-foreground">—</span>}
+                        </td>
+                        <td className="px-4 py-2.5 text-center">
+                          {proc.requiresChecklist ? <CheckSquare className="w-3.5 h-3.5 text-blue-400 mx-auto" /> : <span className="text-muted-foreground">—</span>}
+                        </td>
+                        <td className="px-4 py-2.5 text-muted-foreground tabular-nums">{Number(proc.weight).toFixed(1)}×</td>
+                        <td className="px-4 py-2.5 text-muted-foreground text-xs">{proc.defaultEstimatedMinutes ? `${proc.defaultEstimatedMinutes}m` : '—'}</td>
+                        <td className="px-4 py-2.5">
+                          <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <Button variant="ghost" size="sm" onClick={() => openEdit(proc)}><Pencil className="w-3.5 h-3.5" /></Button>
+                            <Button variant="ghost" size="sm" className="text-destructive hover:text-destructive"
+                              onClick={() => { if (confirm(`Delete ${proc.name}?`)) deleteMutation.mutate(proc.id); }}>
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </Button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </Card>
+            </div>
+          ))
+        )}
+      </div>
+
+      <Modal open={modalOpen} onClose={() => setModalOpen(false)} size="lg"
+        title={editing ? 'Edit Process' : 'New Process Definition'}
+        description="Process definitions drive the entire task engine. Each row here = one possible manufacturing operation."
+        footer={
+          <div className="flex justify-end gap-2">
+            <Button variant="secondary" onClick={() => setModalOpen(false)}>Cancel</Button>
+            <Button loading={saveMutation.isPending} disabled={!form.name || !form.code || !form.departmentId}
+              onClick={handleSubmit}>
+              {editing ? 'Save Changes' : 'Create Process'}
+            </Button>
+          </div>
+        }
+      >
+        <div className="space-y-4">
+          <div className="grid grid-cols-2 gap-4">
+            <Input label="Process Name" value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} placeholder="Cutting" />
+            <Input label="Code" value={form.code} onChange={(e) => setForm((f) => ({ ...f, code: e.target.value.toUpperCase() }))} placeholder="CUT" />
+          </div>
+          <Select label="Department" value={form.departmentId}
+            onChange={(e) => setForm((f) => ({ ...f, departmentId: e.target.value }))}
+            options={(departments as any[]).map((d) => ({ value: d.id, label: d.name }))}
+            placeholder="Select department"
+          />
+          <Select label="Applies To" value={form.appliesTo}
+            onChange={(e) => setForm((f) => ({ ...f, appliesTo: e.target.value as AppliesTo }))}
+            options={[{ value: AppliesTo.PART, label: 'Part (most operations)' }, { value: AppliesTo.UNIT, label: 'Unit (Testing, Dispatch)' }]}
+          />
+          <div className="grid grid-cols-2 gap-4">
+            <Input label="Default Est. Minutes" type="number" min={1} value={form.defaultEstimatedMinutes}
+              onChange={(e) => setForm((f) => ({ ...f, defaultEstimatedMinutes: e.target.value }))} placeholder="30" />
+            <Input label="Progress Weight" type="number" min={0.1} step={0.1} value={form.weight}
+              onChange={(e) => setForm((f) => ({ ...f, weight: e.target.value }))} placeholder="1.0" />
+          </div>
+          <Select label="Default Priority" value={form.defaultPriorityLevelId}
+            onChange={(e) => setForm((f) => ({ ...f, defaultPriorityLevelId: e.target.value }))}
+            options={(priorities as any[]).map((p) => ({ value: p.id, label: p.name }))}
+            placeholder="Inherit from order"
+          />
+          <div className="flex gap-6">
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input type="checkbox" checked={form.requiresVerification}
+                onChange={(e) => setForm((f) => ({ ...f, requiresVerification: e.target.checked }))}
+                className="rounded border-border" />
+              <span className="text-sm text-foreground">Requires verification</span>
+            </label>
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input type="checkbox" checked={form.requiresChecklist}
+                onChange={(e) => setForm((f) => ({ ...f, requiresChecklist: e.target.checked }))}
+                className="rounded border-border" />
+              <span className="text-sm text-foreground">Requires checklist</span>
+            </label>
+          </div>
+        </div>
+      </Modal>
+    </div>
+  );
+}
