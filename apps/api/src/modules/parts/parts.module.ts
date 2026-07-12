@@ -9,6 +9,7 @@ import { UnitsService } from '../units/units.service';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { JwtPayload, TaskStatus } from '@hvacflow/shared-types';
+import { Prisma } from '@prisma/client';
 import { WorkflowProgressModule } from '../workflow-progress/workflow-progress.module';
 import { RealtimeModule } from '../realtime/realtime.module';
 import { UnitsModule } from '../units/units.module';
@@ -117,13 +118,22 @@ export class PartsService {
   }
 
   async update(id: string, dto: UpdatePartDto) {
-    await this.findOne(id);
-    return this.prisma.part.update({
-      where: { id },
-      data: dto,
-      include: { partType: true },
-    });
-  }
+  await this.findOne(id);
+
+  const data: Prisma.PartUpdateInput = {
+    ...dto,
+    specifications:
+      dto.specifications === undefined
+        ? undefined
+        : (dto.specifications as Prisma.InputJsonValue),
+  };
+
+  return this.prisma.part.update({
+    where: { id },
+    data,
+    include: { partType: true },
+  });
+}
 
   async remove(id: string) {
     const part = await this.findOne(id);

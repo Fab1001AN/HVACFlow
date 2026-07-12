@@ -111,7 +111,7 @@ function CatalogPage({
   );
 }
 
-export function UnitTypesPage() {
+function UnitTypesPage() {
   return (
     <CatalogPage
       title="Unit Types"
@@ -125,7 +125,7 @@ export function UnitTypesPage() {
   );
 }
 
-export function PartTypesPage() {
+function PartTypesPage() {
   return (
     <CatalogPage
       title="Part Types"

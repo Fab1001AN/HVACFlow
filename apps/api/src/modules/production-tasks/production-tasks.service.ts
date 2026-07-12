@@ -261,7 +261,7 @@ export class ProductionTasksService {
     if (!dto.note?.trim()) throw new BadRequestException('A note is required when placing a task on hold');
 
     const task = await this.findOne(id);
-    const validFrom = [TaskStatus.Ready, TaskStatus.InProgress, TaskStatus.PendingVerification];
+    const validFrom: TaskStatus[] = [TaskStatus.Ready, TaskStatus.InProgress, TaskStatus.PendingVerification];
     if (!validFrom.includes(task.status)) {
       throw new ConflictException(`Cannot hold task with status ${task.status}`);
     }
@@ -325,7 +325,7 @@ export class ProductionTasksService {
     if (!dto.note?.trim()) throw new BadRequestException('A note is required when rejecting a task');
 
     const task = await this.findOne(id);
-    const validFrom = [TaskStatus.Ready, TaskStatus.InProgress, TaskStatus.PendingVerification, TaskStatus.OnHold];
+    const validFrom: TaskStatus[] = [TaskStatus.Ready, TaskStatus.InProgress, TaskStatus.PendingVerification, TaskStatus.OnHold];
     if (!validFrom.includes(task.status)) {
       throw new ConflictException(`Cannot reject task with status ${task.status}`);
     }

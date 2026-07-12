@@ -15,6 +15,7 @@ import { PrismaService } from '../../common/prisma/prisma.service';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { JwtPayload } from '@hvacflow/shared-types';
+import { Prisma } from '@prisma/client';
 
 // ─── Dashboard Module ─────────────────────────────────────────────────────────
 
@@ -74,12 +75,20 @@ export class DashboardService {
   }
 
   async updateRoleConfig(roleId: string, config: Record<string, unknown>) {
-    return this.prisma.roleDashboardConfig.upsert({
-      where: { roleId },
-      update: { config },
-      create: { roleId, config },
-    });
-  }
+  const jsonConfig = config as Prisma.InputJsonValue;
+
+  return this.prisma.roleDashboardConfig.upsert({
+    where: { roleId },
+    update: {
+      config: jsonConfig,
+    },
+    create: {
+      roleId,
+      config: jsonConfig,
+    },
+  });
+}
+
 }
 
 @ApiTags('Dashboard')

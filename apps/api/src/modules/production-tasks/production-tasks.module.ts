@@ -10,7 +10,7 @@ import { ChecklistsModule } from '../checklists/checklists.module';
 import { IsBoolean, IsOptional, IsString } from 'class-validator';
 
 class HoldRejectDto extends TaskActionDto {
-  @IsString() note: string;
+  @IsString() declare note: string;
 }
 
 class ToggleChecklistDto {

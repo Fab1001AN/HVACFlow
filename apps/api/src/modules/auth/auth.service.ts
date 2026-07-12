@@ -154,19 +154,31 @@ export class AuthService {
   }
 
   private async generateTokens(payload: JwtPayload): Promise<AuthTokens> {
-    const [accessToken, refreshToken] = await Promise.all([
-      this.jwtService.signAsync(payload, {
-        secret: this.configService.get<string>('app.jwt.accessSecret'),
-        expiresIn: this.configService.get<string>('app.jwt.accessExpiresIn', '15m'),
-      }),
-      this.jwtService.signAsync(payload, {
-        secret: this.configService.get<string>('app.jwt.refreshSecret'),
-        expiresIn: this.configService.get<string>('app.jwt.refreshExpiresIn', '7d'),
-      }),
-    ]);
+  const accessSecret =
+    this.configService.getOrThrow<string>("app.jwt.accessSecret");
 
-    return { accessToken, refreshToken };
-  }
+  const refreshSecret =
+    this.configService.getOrThrow<string>("app.jwt.refreshSecret");
+
+  const accessExpiresIn = "15m" as const;
+  const refreshExpiresIn = "7d" as const;
+
+  const [accessToken, refreshToken] = await Promise.all([
+    this.jwtService.signAsync(payload, {
+      secret: accessSecret,
+      expiresIn: accessExpiresIn,
+    }),
+    this.jwtService.signAsync(payload, {
+      secret: refreshSecret,
+      expiresIn: refreshExpiresIn,
+    }),
+  ]);
+
+  return {
+    accessToken,
+    refreshToken,
+  };
+}
 
   private async getFullUser(userId: string) {
     return this.prisma.user.findUnique({

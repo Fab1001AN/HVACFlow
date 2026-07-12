@@ -3,6 +3,7 @@ import { PrismaService } from '../../common/prisma/prisma.service';
 import { WorkflowProgressService } from '../workflow-progress/workflow-progress.service';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
 import { TaskStatus } from '@hvacflow/shared-types';
+import { Prisma } from '@prisma/client';
 import { IsString, IsOptional, IsUUID, IsObject } from 'class-validator';
 
 export class CreateUnitDto {
@@ -103,7 +104,10 @@ export class UnitsService {
           orderId,
           unitTypeId: dto.unitTypeId,
           serialNumber: dto.serialNumber,
-          specifications: dto.specifications,
+          specifications:
+            dto.specifications === undefined
+              ? undefined
+              : (dto.specifications as Prisma.InputJsonValue),
           createdByUserId: userId,
         },
       });
@@ -116,7 +120,7 @@ export class UnitsService {
       // Create unit-level tasks (Testing, Dispatch, etc.)
       let previousTaskId: string | null = null;
       for (const route of unitRoutes) {
-        const task = await tx.productionTask.create({
+        const task: { id: string } = await tx.productionTask.create({
           data: {
             unitId: newUnit.id,
             departmentId: route.processDefinition.departmentId,
@@ -167,9 +171,18 @@ export class UnitsService {
 
   async update(id: string, dto: UpdateUnitDto) {
     await this.findOne(id);
+
+    const data: Prisma.UnitUpdateInput = {
+      ...dto,
+      specifications:
+        dto.specifications === undefined
+          ? undefined
+          : (dto.specifications as Prisma.InputJsonValue),
+    };
+
     return this.prisma.unit.update({
       where: { id },
-      data: dto,
+      data,
       include: { unitType: true },
     });
   }
@@ -240,7 +253,7 @@ export class UnitsService {
     let firstTaskId: string | null = null;
 
     for (const route of routes) {
-      const task = await tx.productionTask.create({
+      const task: { id: string } = await tx.productionTask.create({
         data: {
           partId: part.id,
           departmentId: route.processDefinition.departmentId,
