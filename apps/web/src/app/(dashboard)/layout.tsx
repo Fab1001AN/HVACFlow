@@ -8,12 +8,13 @@ import { cn, initials } from '@/lib/utils';
 import {
   LayoutDashboard, Users, FolderOpen, ShoppingBag, Box, Settings,
   ChevronRight, LogOut, Building2, Sliders, Wrench, ClipboardList,
-  BarChart3, Cpu, GitBranch, Tag, Package, ListChecks, Menu, X,
+  BarChart3, Cpu, GitBranch, Tag, Package, ListChecks, Menu, X, CalendarDays, Factory,
 } from 'lucide-react';
 
 const NAV_ITEMS = [
-  { href: '/mission-control', label: 'Mission Control', icon: LayoutDashboard },
-  { href: '/customers', label: 'Customers', icon: Users },
+  { href: '/production-calendar', label: 'Production Calendar', icon: CalendarDays },
+  { href: '/director-dashboard', label: 'Director Dashboard', icon: BarChart3 },
+  { href: '/mission-control', label: 'Department Work', icon: Factory },
 ];
 
 const CONFIG_ITEMS = [

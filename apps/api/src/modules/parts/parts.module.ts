@@ -83,13 +83,18 @@ export class PartsService {
     });
     if (!unit) throw new NotFoundException('Unit not found');
 
+    const priorityLevelId = unit.priorityLevelId ?? unit.order?.priorityLevelId;
+    if (!priorityLevelId) {
+      throw new BadRequestException('Unit does not have a priority level assigned');
+    }
+
     const part = await this.prisma.$transaction(async (tx) => {
       return this.unitsService.createPartWithTasks(
         tx,
         unitId,
         dto.partTypeId,
         dto.quantity ?? 1,
-        unit.order.priorityLevelId,
+        priorityLevelId,
         userId,
       );
     });
@@ -191,3 +196,4 @@ export class PartsController {
   exports: [PartsService],
 })
 export class PartsModule {}
+

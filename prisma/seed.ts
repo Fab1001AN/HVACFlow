@@ -1,3 +1,4 @@
+import 'dotenv/config';
 /**
  * HVACFlow Database Seed
  *
@@ -152,13 +153,17 @@ async function main() {
   console.log('Creating departments...');
 
   const departmentData = [
-    { name: 'Fabrication', code: 'FAB', color: '#6366f1', sortOrder: 1 },
-    { name: 'Foaming', code: 'FOAM', color: '#f59e0b', sortOrder: 2 },
-    { name: 'Assembly', code: 'ASSY', color: '#10b981', sortOrder: 3 },
-    { name: 'Electrical', code: 'ELEC', color: '#8b5cf6', sortOrder: 4 },
-    { name: 'Painting', code: 'PAINT', color: '#ec4899', sortOrder: 5 },
-    { name: 'Quality Assurance', code: 'QA', color: '#14b8a6', sortOrder: 6 },
-    { name: 'Logistics', code: 'LOG', color: '#64748b', sortOrder: 7 },
+    { name: 'Engineering', code: 'ENG', color: '#0ea5e9', sortOrder: 1 },
+    { name: 'Design & Programming', code: 'DESIGN', color: '#2563eb', sortOrder: 2 },
+    { name: 'Fabrication', code: 'FAB', color: '#6366f1', sortOrder: 3 },
+    { name: 'Foaming', code: 'FOAM', color: '#f59e0b', sortOrder: 4 },
+    { name: 'Assembly', code: 'ASSY', color: '#10b981', sortOrder: 5 },
+    { name: 'Electrical', code: 'ELEC', color: '#8b5cf6', sortOrder: 6 },
+    { name: 'Piping', code: 'PIPE', color: '#06b6d4', sortOrder: 7 },
+    { name: 'Painting', code: 'PAINT', color: '#ec4899', sortOrder: 8 },
+    { name: 'Miscellaneous Finishing', code: 'MISC', color: '#a855f7', sortOrder: 9 },
+    { name: 'Testing & Quality', code: 'QA', color: '#14b8a6', sortOrder: 10 },
+    { name: 'Dispatch', code: 'LOG', color: '#64748b', sortOrder: 11 },
   ];
 
   const departments: Record<string, string> = {};
@@ -208,10 +213,13 @@ async function main() {
   console.log('Creating unit types...');
 
   const unitTypeData = [
-    { name: 'Rooftop Package Unit', code: 'RTU' },
+    { name: 'Rooftop Unit', code: 'RTU' },
+    { name: 'Make-Up Air Unit', code: 'MUA' },
     { name: 'Air Handling Unit', code: 'AHU' },
+    { name: 'Energy Recovery Ventilator', code: 'ERV' },
     { name: 'Split System', code: 'SS' },
     { name: 'Fan Coil Unit', code: 'FCU' },
+    { name: 'Custom Unit', code: 'CUSTOM' },
   ];
 
   const unitTypes: Record<string, string> = {};
@@ -555,3 +563,4 @@ main()
     await prisma.$disconnect();
     process.exit(1);
   });
+

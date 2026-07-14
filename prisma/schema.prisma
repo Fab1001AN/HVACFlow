@@ -83,6 +83,7 @@ model User {
   checklistCompletions    ChecklistResponse[]
   createdUnits            Unit[]
   createdParts            Part[]
+  unitComments            UnitComment[]
 
   @@map("users")
 }
@@ -160,6 +161,7 @@ model PriorityLevel {
   isActive  Boolean @default(true)
 
   orders            Order[]
+  units             Unit[]
   tasks             ProductionTask[]
   processDefaults   ProcessDefinition[]
 
@@ -270,27 +272,64 @@ model UnitTypeComposition {
 }
 
 model Unit {
-  id                 String     @id @default(uuid())
-  orderId            String
-  unitTypeId         String
-  serialNumber       String     @unique
-  specifications     Json?
-  progressPercentage Decimal    @default(0) @db.Decimal(5, 2)
-  status             UnitStatus @default(Planned)
-  createdByUserId    String
-  createdAt          DateTime   @default(now())
-  updatedAt          DateTime   @updatedAt
-  deletedAt          DateTime?
+  id                       String     @id @default(uuid())
+  orderId                  String?
+  unitTypeId               String
+  priorityLevelId          String?
+  currentDepartmentId      String?
+  serialNumber             String     @unique
+  displayName              String?
+  specifications           Json?
+  plannedStartDate         DateTime?
+  dueDate                  DateTime?
+  priorityPosition         Int        @default(0)
+  currentStage             String?
+  isBlocked                Boolean    @default(false)
+  holdReason               String?
+  oneDriveFolderUrl        String?
+  submittalReceived        Boolean    @default(false)
+  designComplete           Boolean    @default(false)
+  drawingsAvailable        Boolean    @default(false)
+  programmingFilesComplete Boolean    @default(false)
+  cuttingProgramsAvailable Boolean    @default(false)
+  progressPercentage       Decimal    @default(0) @db.Decimal(5, 2)
+  status                   UnitStatus @default(Planned)
+  createdByUserId          String
+  createdAt                DateTime   @default(now())
+  updatedAt                DateTime   @updatedAt
+  deletedAt                DateTime?
 
-  order           Order            @relation(fields: [orderId], references: [id])
-  unitType        UnitType         @relation(fields: [unitTypeId], references: [id])
-  createdBy       User             @relation(fields: [createdByUserId], references: [id])
-  parts           Part[]
-  tasks           ProductionTask[] @relation("UnitTasks")
+  order             Order?            @relation(fields: [orderId], references: [id])
+  unitType          UnitType          @relation(fields: [unitTypeId], references: [id])
+  priorityLevel     PriorityLevel?    @relation(fields: [priorityLevelId], references: [id])
+  currentDepartment Department?       @relation(fields: [currentDepartmentId], references: [id])
+  createdBy         User              @relation(fields: [createdByUserId], references: [id])
+  parts             Part[]
+  tasks             ProductionTask[] @relation("UnitTasks")
+  comments          UnitComment[]
 
   @@index([orderId])
+  @@index([priorityLevelId])
+  @@index([currentDepartmentId])
+  @@index([plannedStartDate])
+  @@index([dueDate])
   @@index([status])
   @@map("units")
+}
+
+model UnitComment {
+  id        String   @id @default(uuid())
+  unitId    String
+  userId    String
+  message   String
+  isDelay   Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  unit Unit @relation(fields: [unitId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([unitId, createdAt])
+  @@map("unit_comments")
 }
 
 model Part {
@@ -334,6 +373,7 @@ model Department {
   processDefinitions ProcessDefinition[]
   machines           Machine[]
   tasks              ProductionTask[]
+  currentUnits       Unit[]
 
   @@map("departments")
 }

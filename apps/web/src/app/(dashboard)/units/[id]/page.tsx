@@ -5,8 +5,8 @@ import { useParams } from 'next/navigation';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { useAuthStore } from '@/store/auth.store';
-import { PageHeader, Button, EmptyState, Spinner, Modal, Input, Select, Card, ProgressBar } from '@/components/shared';
-import { Plus, Package, ChevronRight, CheckCircle, Circle, Clock, AlertCircle } from 'lucide-react';
+import { PageHeader, Button, EmptyState, Spinner, Modal, Input, Select, Card, ProgressBar, Textarea, Badge } from '@/components/shared';
+import { Plus, Package, ChevronRight, CheckCircle, Circle, Clock, AlertCircle, ExternalLink, MessageSquare, AlertTriangle } from 'lucide-react';
 import Link from 'next/link';
 import { toast } from '@/components/shared';
 import { cn, PART_STATUS_BG, STATUS_BG, STATUS_LABELS } from '@/lib/utils';
@@ -23,6 +23,8 @@ export default function UnitDetailPage() {
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [addPartOpen, setAddPartOpen] = useState(false);
   const [partForm, setPartForm] = useState({ partTypeId: '', identifier: '', quantity: 1 });
+  const [comment, setComment] = useState('');
+  const [delayComment, setDelayComment] = useState(false);
 
   useSubscribeUnit(id);
 
@@ -48,6 +50,27 @@ export default function UnitDetailPage() {
     queryClient.invalidateQueries({ queryKey: ['unit', id] });
   }, [id]);
 
+  const updateUnitMutation = useMutation({
+    mutationFn: (body: any) => api.units.update(id, body),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['unit', id] });
+      queryClient.invalidateQueries({ queryKey: ['units'] });
+      toast('Unit updated', 'success');
+    },
+    onError: (err: any) => toast(err.message, 'error'),
+  });
+
+  const commentMutation = useMutation({
+    mutationFn: () => api.units.addComment(id, { message: comment, isDelay: delayComment }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['unit', id] });
+      setComment('');
+      setDelayComment(false);
+      toast('Comment added', 'success');
+    },
+    onError: (err: any) => toast(err.message, 'error'),
+  });
+
   const addPartMutation = useMutation({
     mutationFn: (body: any) => api.parts.create(id, body),
     onSuccess: () => {
@@ -69,10 +92,7 @@ export default function UnitDetailPage() {
       <PageHeader
         title={unit.serialNumber}
         breadcrumbs={[
-          { label: 'Customers', href: '/customers' },
-          { label: unit.order?.project?.customer?.name, href: `/customers/${unit.order?.project?.customerId}` },
-          { label: unit.order?.project?.name, href: `/projects/${unit.order?.projectId}` },
-          { label: unit.order?.orderNumber, href: `/orders/${unit.orderId}` },
+          { label: 'Production Calendar', href: '/production-calendar' },
           { label: unit.serialNumber },
         ]}
         action={
@@ -108,6 +128,50 @@ export default function UnitDetailPage() {
             </div>
           )}
         </Card>
+
+        {/* Planning and engineering readiness */}
+        <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+          <Card className="p-4">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-sm font-semibold">Planning & file readiness</h2>
+              {unit.oneDriveFolderUrl && <a href={unit.oneDriveFolderUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-xs text-primary hover:underline">Open OneDrive <ExternalLink className="w-3.5 h-3.5" /></a>}
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              {[
+                ['submittalReceived', 'Submittal received'],
+                ['designComplete', 'Design complete'],
+                ['drawingsAvailable', 'Drawings available'],
+                ['programmingFilesComplete', 'Programming files complete'],
+                ['cuttingProgramsAvailable', 'Cutting programs available'],
+              ].map(([key, label]) => (
+                <label key={key} className="flex items-center gap-2 rounded-md border border-border p-2.5 text-sm cursor-pointer hover:bg-accent/40">
+                  <input type="checkbox" checked={Boolean(unit[key])} disabled={!hasPermission('unit:manage') || updateUnitMutation.isPending} onChange={(e) => updateUnitMutation.mutate({ [key]: e.target.checked })} />
+                  <span>{label}</span>
+                </label>
+              ))}
+            </div>
+            <div className="mt-4 flex items-center gap-2">
+              <Button variant={unit.isBlocked ? 'destructive' : 'outline'} size="sm" onClick={() => updateUnitMutation.mutate({ isBlocked: !unit.isBlocked, holdReason: unit.isBlocked ? '' : 'Awaiting update' })}>
+                <AlertTriangle className="w-3.5 h-3.5" /> {unit.isBlocked ? 'Blocked' : 'Mark blocked'}
+              </Button>
+              {unit.currentDepartment?.name && <Badge variant="outline">Current: {unit.currentDepartment.name}</Badge>}
+              {unit.currentStage && <Badge variant="muted">{unit.currentStage}</Badge>}
+            </div>
+          </Card>
+
+          <Card className="p-4">
+            <div className="flex items-center gap-2 mb-4"><MessageSquare className="w-4 h-4" /><h2 className="text-sm font-semibold">Comments & delay reasons</h2></div>
+            <Textarea placeholder="Add production update, missing material, drawing issue, or hold reason..." value={comment} onChange={(e) => setComment(e.target.value)} />
+            <div className="flex items-center justify-between mt-2">
+              <label className="flex items-center gap-2 text-xs text-muted-foreground"><input type="checkbox" checked={delayComment} onChange={(e) => setDelayComment(e.target.checked)} /> Mark as delay / blocker</label>
+              <Button size="sm" loading={commentMutation.isPending} disabled={!comment.trim()} onClick={() => commentMutation.mutate()}>Add Comment</Button>
+            </div>
+            <div className="mt-4 max-h-52 overflow-y-auto space-y-2">
+              {(unit.comments ?? []).map((item: any) => <div key={item.id} className={cn('rounded-md border border-border p-2.5', item.isDelay && 'border-amber-500/40 bg-amber-500/5')}><div className="flex justify-between gap-3 text-xs"><span className="font-medium">{item.user?.name}</span><span className="text-muted-foreground">{new Date(item.createdAt).toLocaleString()}</span></div><p className="text-sm mt-1 whitespace-pre-wrap">{item.message}</p></div>)}
+              {!unit.comments?.length && <p className="text-xs text-muted-foreground">No comments yet.</p>}
+            </div>
+          </Card>
+        </div>
 
         {/* Parts */}
         <div>

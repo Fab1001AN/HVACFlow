@@ -255,12 +255,20 @@ export const api = {
   },
 
   units: {
+    list: (params?: any) => api.get<any>('/units', { params }),
+    calendar: (params?: { from?: string; to?: string }) => api.get<any[]>('/units/calendar', { params }),
+    directorSummary: () => api.get<any>('/units/director-summary'),
     listByOrder: (orderId: string, params?: any) =>
       api.get<any>(`/orders/${orderId}/units`, { params }),
     get: (id: string) => api.get<any>(`/units/${id}`),
+    createDirect: (body: any) => api.post<any>('/units', body),
     create: (orderId: string, body: any) =>
       api.post<any>(`/orders/${orderId}/units`, body),
     update: (id: string, body: any) => api.patch<any>(`/units/${id}`, body),
+    move: (id: string, body: { plannedStartDate: string; priorityPosition: number }) =>
+      api.patch<any>(`/units/${id}/move`, body),
+    addComment: (id: string, body: { message: string; isDelay?: boolean }) =>
+      api.post<any>(`/units/${id}/comments`, body),
     getAllTasks: (id: string) => api.get<any[]>(`/units/${id}/tasks`),
   },
 

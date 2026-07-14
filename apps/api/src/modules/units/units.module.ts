@@ -1,25 +1,69 @@
 import { Controller, Get, Post, Patch, Delete, Body, Param, Query, Module } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
-import { UnitsService, CreateUnitDto, UpdateUnitDto } from './units.service';
+import {
+  UnitsService,
+  CreateUnitDto,
+  UpdateUnitDto,
+  MoveUnitDto,
+  AddUnitCommentDto,
+} from './units.service';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { JwtPayload } from '@hvacflow/shared-types';
 import { WorkflowProgressModule } from '../workflow-progress/workflow-progress.module';
 import { RealtimeModule } from '../realtime/realtime.module';
 import { PaginationQueryDto } from '../../common/dto/pagination.dto';
+import { UnitStatus } from '@prisma/client';
 
-@ApiTags('Units')
+@ApiTags('Units & Production Planning')
 @ApiBearerAuth()
 @Controller()
 export class UnitsController {
   constructor(private readonly service: UnitsService) {}
 
+  @Get('units')
+  @RequirePermissions('unit:view')
+  findAll(
+    @Query() pagination: PaginationQueryDto,
+    @Query('status') status?: UnitStatus,
+    @Query('departmentId') departmentId?: string,
+  ) {
+    return this.service.findAll(pagination.page, pagination.pageSize, status, departmentId);
+  }
+
+  @Get('units/calendar')
+  @RequirePermissions('unit:view')
+  calendar(@Query('from') from?: string, @Query('to') to?: string) {
+    return this.service.calendar(from, to);
+  }
+
+  @Get('units/director-summary')
+  @RequirePermissions('unit:view')
+  directorSummary() {
+    return this.service.directorSummary();
+  }
+
+  @Post('units')
+  @RequirePermissions('unit:manage')
+  createDirect(@Body() dto: CreateUnitDto, @CurrentUser() user: JwtPayload) {
+    return this.service.createDirect(dto, user.sub);
+  }
+
+  @Patch('units/:id/move')
+  @RequirePermissions('unit:manage')
+  move(@Param('id') id: string, @Body() dto: MoveUnitDto) {
+    return this.service.move(id, dto);
+  }
+
+  @Post('units/:id/comments')
+  @RequirePermissions('unit:view')
+  addComment(@Param('id') id: string, @Body() dto: AddUnitCommentDto, @CurrentUser() user: JwtPayload) {
+    return this.service.addComment(id, dto, user.sub);
+  }
+
   @Get('orders/:orderId/units')
   @RequirePermissions('unit:view')
-  findByOrder(
-    @Param('orderId') orderId: string,
-    @Query() pagination: PaginationQueryDto,
-  ) {
+  findByOrder(@Param('orderId') orderId: string, @Query() pagination: PaginationQueryDto) {
     return this.service.findByOrder(orderId, pagination.page, pagination.pageSize);
   }
 
@@ -31,11 +75,7 @@ export class UnitsController {
 
   @Post('orders/:orderId/units')
   @RequirePermissions('unit:manage')
-  create(
-    @Param('orderId') orderId: string,
-    @Body() dto: CreateUnitDto,
-    @CurrentUser() user: JwtPayload,
-  ) {
+  create(@Param('orderId') orderId: string, @Body() dto: CreateUnitDto, @CurrentUser() user: JwtPayload) {
     return this.service.create(orderId, dto, user.sub);
   }
 

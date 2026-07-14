@@ -1,5 +1,5 @@
 import { redirect } from 'next/navigation';
 
-export default function RootPage() {
-  redirect('/mission-control');
+export default function HomePage() {
+  redirect('/production-calendar');
 }
