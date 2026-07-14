@@ -11,7 +11,7 @@ import { AppliesTo } from '@hvacflow/shared-types';
 
 const EMPTY_FORM = {
   name: '', code: '', departmentId: '', appliesTo: AppliesTo.PART as AppliesTo,
-  requiresChecklist: false, requiresVerification: false,
+  requiresChecklist: false, requiresVerification: false, isOptional: false,
   defaultEstimatedMinutes: '', defaultPriorityLevelId: '', weight: '1.0',
 };
 
@@ -20,6 +20,7 @@ export default function ProcessesConfigPage() {
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<any>(null);
   const [form, setForm] = useState({ ...EMPTY_FORM });
+  const [showArchived, setShowArchived] = useState(false);
 
   const { data: processes = [], isLoading } = useQuery({
     queryKey: ['process-definitions'],
@@ -54,7 +55,7 @@ export default function ProcessesConfigPage() {
 
   const deleteMutation = useMutation({
     mutationFn: (id: string) => api.processDefinitions.delete(id),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['process-definitions'] }); toast('Process deleted', 'success'); },
+    onSuccess: (result: any) => { queryClient.invalidateQueries({ queryKey: ['process-definitions'] }); toast(result?.archived ? 'Process archived because it has history' : 'Process deleted', 'success'); },
     onError: (err: any) => toast(err.message, 'error'),
   });
 
@@ -64,7 +65,7 @@ export default function ProcessesConfigPage() {
     setForm({
       name: proc.name, code: proc.code, departmentId: proc.departmentId,
       appliesTo: proc.appliesTo, requiresChecklist: proc.requiresChecklist,
-      requiresVerification: proc.requiresVerification,
+      requiresVerification: proc.requiresVerification, isOptional: proc.isOptional,
       defaultEstimatedMinutes: proc.defaultEstimatedMinutes?.toString() ?? '',
       defaultPriorityLevelId: proc.defaultPriorityLevelId ?? '',
       weight: proc.weight?.toString() ?? '1.0',
@@ -81,8 +82,9 @@ export default function ProcessesConfigPage() {
     });
   };
 
-  // Group by department
-  const grouped = (processes as any[]).reduce((acc: Record<string, any[]>, proc: any) => {
+  // Group by department. Archived processes stay recoverable but are hidden by default.
+  const visibleProcesses = showArchived ? processes : (processes as any[]).filter((proc: any) => proc.isActive);
+  const grouped = (visibleProcesses as any[]).reduce((acc: Record<string, any[]>, proc: any) => {
     const deptName = proc.department?.name ?? 'Unassigned';
     if (!acc[deptName]) acc[deptName] = [];
     acc[deptName].push(proc);
@@ -94,7 +96,7 @@ export default function ProcessesConfigPage() {
       <PageHeader
         title="Process Definitions"
         description="Every manufacturing operation. No process names are hardcoded — add any new process here."
-        action={<Button leftIcon={<Plus className="w-3.5 h-3.5" />} onClick={openCreate}>New Process</Button>}
+        action={<div className="flex items-center gap-3"><label className="flex items-center gap-2 text-xs text-muted-foreground"><input type="checkbox" checked={showArchived} onChange={(e) => setShowArchived(e.target.checked)} />Show archived</label><Button leftIcon={<Plus className="w-3.5 h-3.5" />} onClick={openCreate}>New Process</Button></div>}
       />
 
       <div className="flex-1 overflow-y-auto p-6 space-y-6">
@@ -102,7 +104,7 @@ export default function ProcessesConfigPage() {
           <div className="flex items-center justify-center h-48"><Spinner className="w-6 h-6" /></div>
         ) : Object.keys(grouped).length === 0 ? (
           <EmptyState title="No processes yet" icon={<Cpu className="w-10 h-10" />}
-            action={<Button leftIcon={<Plus className="w-3.5 h-3.5" />} onClick={openCreate}>New Process</Button>}
+            action={<div className="flex items-center gap-3"><label className="flex items-center gap-2 text-xs text-muted-foreground"><input type="checkbox" checked={showArchived} onChange={(e) => setShowArchived(e.target.checked)} />Show archived</label><Button leftIcon={<Plus className="w-3.5 h-3.5" />} onClick={openCreate}>New Process</Button></div>}
           />
         ) : (
           Object.entries(grouped).map(([deptName, procs]) => (
@@ -116,7 +118,7 @@ export default function ProcessesConfigPage() {
                       <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground">Applies To</th>
                       <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground">Verify</th>
                       <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground">Checklist</th>
-                      <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground">Weight</th>
+                      <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground">Optional</th><th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground">Weight</th>
                       <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground">Est.</th>
                       <th className="w-20" />
                     </tr>
@@ -144,13 +146,14 @@ export default function ProcessesConfigPage() {
                         <td className="px-4 py-2.5 text-center">
                           {proc.requiresChecklist ? <CheckSquare className="w-3.5 h-3.5 text-blue-400 mx-auto" /> : <span className="text-muted-foreground">—</span>}
                         </td>
-                        <td className="px-4 py-2.5 text-muted-foreground tabular-nums">{Number(proc.weight).toFixed(1)}×</td>
+                        <td className="px-4 py-2.5 text-center">{proc.isOptional ? 'Yes' : 'No'}</td><td className="px-4 py-2.5 text-muted-foreground tabular-nums">{Number(proc.weight).toFixed(1)}×</td>
                         <td className="px-4 py-2.5 text-muted-foreground text-xs">{proc.defaultEstimatedMinutes ? `${proc.defaultEstimatedMinutes}m` : '—'}</td>
                         <td className="px-4 py-2.5">
-                          <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <div className="flex items-center gap-1">
                             <Button variant="ghost" size="sm" onClick={() => openEdit(proc)}><Pencil className="w-3.5 h-3.5" /></Button>
+                            <Button variant="ghost" size="sm" onClick={() => api.processDefinitions.update(proc.id, { isActive: !proc.isActive }).then(() => queryClient.invalidateQueries({ queryKey: ['process-definitions'] })).catch((err: any) => toast(err.message, 'error'))}>{proc.isActive ? 'Disable' : 'Enable'}</Button>
                             <Button variant="ghost" size="sm" className="text-destructive hover:text-destructive"
-                              onClick={() => { if (confirm(`Delete ${proc.name}?`)) deleteMutation.mutate(proc.id); }}>
+                              onClick={() => { if (confirm(`${proc.isActive ? 'Remove' : 'Delete'} ${proc.name}? Processes with history will be archived safely.`)) deleteMutation.mutate(proc.id); }}>
                               <Trash2 className="w-3.5 h-3.5" />
                             </Button>
                           </div>
@@ -210,6 +213,7 @@ export default function ProcessesConfigPage() {
                 className="rounded border-border" />
               <span className="text-sm text-foreground">Requires verification</span>
             </label>
+            <label className="flex items-center gap-2 cursor-pointer"><input type="checkbox" checked={form.isOptional} onChange={(e) => setForm((f) => ({ ...f, isOptional: e.target.checked }))} className="rounded border-border" /><span className="text-sm text-foreground">Optional process</span></label>
             <label className="flex items-center gap-2 cursor-pointer">
               <input type="checkbox" checked={form.requiresChecklist}
                 onChange={(e) => setForm((f) => ({ ...f, requiresChecklist: e.target.checked }))}

@@ -8,13 +8,15 @@ import { cn, initials } from '@/lib/utils';
 import {
   LayoutDashboard, Users, FolderOpen, ShoppingBag, Box, Settings,
   ChevronRight, LogOut, Building2, Sliders, Wrench, ClipboardList,
-  BarChart3, Cpu, GitBranch, Tag, Package, ListChecks, Menu, X, CalendarDays, Factory,
+  BarChart3, Cpu, GitBranch, Tag, Package, ListChecks, Menu, X, CalendarDays, Factory, GripVertical,
 } from 'lucide-react';
 
 const NAV_ITEMS = [
   { href: '/production-calendar', label: 'Production Calendar', icon: CalendarDays },
   { href: '/director-dashboard', label: 'Director Dashboard', icon: BarChart3 },
-  { href: '/mission-control', label: 'Department Work', icon: Factory },
+  { href: '/manager-dashboard', label: 'Manager Dashboard', icon: ClipboardList },
+  { href: '/engineering-dashboard', label: 'Engineering Manager', icon: Wrench },
+  { href: '/department-work', label: 'Department Work', icon: Factory },
 ];
 
 const CONFIG_ITEMS = [
@@ -37,6 +39,36 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const { user, isAuthenticated, logout, loadMe, hasPermission } = useAuthStore();
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [navItems, setNavItems] = useState(NAV_ITEMS);
+  const [draggedNavHref, setDraggedNavHref] = useState<string | null>(null);
+
+  useEffect(() => {
+    const saved = localStorage.getItem('hvacflow:nav-order');
+    if (!saved) return;
+    try {
+      const order = JSON.parse(saved) as string[];
+      const ordered = order.map((href) => NAV_ITEMS.find((item) => item.href === href)).filter(Boolean) as typeof NAV_ITEMS;
+      const missing = NAV_ITEMS.filter((item) => !order.includes(item.href));
+      setNavItems([...ordered, ...missing]);
+    } catch {
+      localStorage.removeItem('hvacflow:nav-order');
+    }
+  }, []);
+
+  const moveNavItem = (targetHref: string) => {
+    if (!draggedNavHref || draggedNavHref === targetHref) return;
+    setNavItems((current) => {
+      const next = [...current];
+      const fromIndex = next.findIndex((item) => item.href === draggedNavHref);
+      const toIndex = next.findIndex((item) => item.href === targetHref);
+      if (fromIndex < 0 || toIndex < 0) return current;
+      const [moved] = next.splice(fromIndex, 1);
+      next.splice(toIndex, 0, moved);
+      localStorage.setItem('hvacflow:nav-order', JSON.stringify(next.map((item) => item.href)));
+      return next;
+    });
+    setDraggedNavHref(null);
+  };
 
   useEffect(() => {
     if (!isAuthenticated) {
@@ -86,18 +118,24 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
         {/* Navigation */}
         <nav className="flex-1 overflow-y-auto py-3 space-y-0.5 px-2">
-          {NAV_ITEMS.map((item) => {
+          {navItems.map((item) => {
             const Icon = item.icon;
             const active = pathname === item.href || pathname.startsWith(item.href + '/');
             return (
-              <NavItem
+              <div
                 key={item.href}
-                href={item.href}
-                icon={<Icon className="w-4 h-4" />}
-                label={item.label}
-                active={active}
-                collapsed={!sidebarOpen}
-              />
+                draggable={sidebarOpen}
+                onDragStart={() => setDraggedNavHref(item.href)}
+                onDragOver={(event) => event.preventDefault()}
+                onDrop={() => moveNavItem(item.href)}
+                onDragEnd={() => setDraggedNavHref(null)}
+                className={cn('flex items-center rounded-md', draggedNavHref === item.href && 'opacity-40')}
+              >
+                {sidebarOpen && <GripVertical className="w-3.5 h-3.5 ml-1 text-muted-foreground cursor-grab flex-shrink-0" />}
+                <div className="flex-1 min-w-0">
+                  <NavItem href={item.href} icon={<Icon className="w-4 h-4" />} label={item.label} active={active} collapsed={!sidebarOpen} />
+                </div>
+              </div>
             );
           })}
 
@@ -177,7 +215,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             onClick={(e) => e.stopPropagation()}
           >
             <nav className="flex-1 overflow-y-auto py-3 space-y-0.5 px-2">
-              {NAV_ITEMS.map((item) => {
+              {navItems.map((item) => {
                 const Icon = item.icon;
                 const active = pathname === item.href;
                 return (

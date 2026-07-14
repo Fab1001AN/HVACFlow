@@ -42,6 +42,11 @@ export class CreateProcessDefinitionDto {
   @IsBoolean()
   requiresVerification?: boolean = false;
 
+  @ApiPropertyOptional({ default: false })
+  @IsOptional()
+  @IsBoolean()
+  isOptional?: boolean = false;
+
   @ApiPropertyOptional({ example: 30 })
   @IsOptional()
   @IsInt()

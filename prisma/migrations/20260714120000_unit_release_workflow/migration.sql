@@ -1,0 +1,10 @@
+CREATE TYPE "EngineeringStatus" AS ENUM ('NotStarted','SubmittalReceived','DesigningStarted','UnitDesignCompleted','DrawingsCompleted','ProgrammingCompleted','ReleasedToManufacturing');
+CREATE TYPE "ProductionReleaseStatus" AS ENUM ('AwaitingRelease','Released','Started','OnHold');
+ALTER TABLE "units" ADD COLUMN "productionMonth" TIMESTAMP(3), ADD COLUMN "engineeringStatus" "EngineeringStatus" NOT NULL DEFAULT 'NotStarted', ADD COLUMN "productionReleaseStatus" "ProductionReleaseStatus" NOT NULL DEFAULT 'AwaitingRelease', ADD COLUMN "releasedAt" TIMESTAMP(3), ADD COLUMN "releasedByUserId" TEXT, ADD COLUMN "manufacturingStartedAt" TIMESTAMP(3);
+ALTER TABLE "process_definitions" ADD COLUMN "isOptional" BOOLEAN NOT NULL DEFAULT false;
+CREATE INDEX "units_productionMonth_idx" ON "units"("productionMonth");
+CREATE INDEX "units_engineeringStatus_idx" ON "units"("engineeringStatus");
+CREATE INDEX "units_productionReleaseStatus_idx" ON "units"("productionReleaseStatus");
+UPDATE "process_definitions" SET "isOptional" = true WHERE "code" = 'SUBASSY';
+UPDATE "process_definitions" SET "departmentId" = (SELECT "id" FROM "departments" WHERE "code"='FAB') WHERE "code"='FOAM';
+UPDATE "departments" SET "isActive" = false WHERE "code"='FOAM';

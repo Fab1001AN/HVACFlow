@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, ConflictException } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { CreateProcessDefinitionDto } from './dto/create-process-definition.dto';
 import { PartialType } from '@nestjs/swagger';
@@ -63,11 +63,15 @@ export class ProcessDefinitionsService {
     ]);
 
     if (taskCount > 0 || routeCount > 0) {
-      throw new ConflictException(
-        'Cannot delete process definition referenced by tasks or routes. Deactivate it instead.',
-      );
+      const archived = await this.prisma.processDefinition.update({
+        where: { id },
+        data: { isActive: false },
+        include: { department: true, defaultPriorityLevel: true },
+      });
+      return { ...archived, archived: true, message: 'Process has production or route history, so it was archived instead of permanently deleted.' };
     }
 
+    await this.findOne(id);
     return this.prisma.processDefinition.delete({ where: { id } });
   }
 }

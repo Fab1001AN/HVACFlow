@@ -37,6 +37,14 @@ export class UnitsController {
     return this.service.calendar(from, to);
   }
 
+  @Get('units/manager-summary')
+  @RequirePermissions('unit:view')
+  managerSummary() { return this.service.managerSummary(); }
+
+  @Get('units/engineering-queue')
+  @RequirePermissions('unit:view')
+  engineeringQueue() { return this.service.engineeringQueue(); }
+
   @Get('units/director-summary')
   @RequirePermissions('unit:view')
   directorSummary() {
@@ -54,6 +62,18 @@ export class UnitsController {
   move(@Param('id') id: string, @Body() dto: MoveUnitDto) {
     return this.service.move(id, dto);
   }
+
+  @Post('units/:id/engineering/advance')
+  @RequirePermissions('unit:manage')
+  advanceEngineering(@Param('id') id: string) { return this.service.advanceEngineering(id); }
+
+  @Post('units/:id/release')
+  @RequirePermissions('unit:manage')
+  release(@Param('id') id: string, @CurrentUser() user: JwtPayload) { return this.service.releaseToProduction(id, user.sub); }
+
+  @Post('units/:id/start-manufacturing')
+  @RequirePermissions('task:start')
+  startManufacturing(@Param('id') id: string) { return this.service.startManufacturing(id); }
 
   @Post('units/:id/comments')
   @RequirePermissions('unit:view')

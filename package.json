@@ -8,28 +8,34 @@
     "packages/*"
   ],
   "scripts": {
-    "dev": "turbo run dev",
-    "build": "turbo run build",
-    "lint": "turbo run lint",
-    "typecheck": "turbo run typecheck",
-    "test": "turbo run test",
+    "dev": "npm run build:shared && concurrently --kill-others-on-fail --names SHARED,API,WEB \"npm run dev:shared\" \"npm run dev:api\" \"npm run dev:web\"",
+    "build": "npm run build:shared && npm run build --workspace=@hvacflow/api && npm run build --workspace=@hvacflow/web",
+    "lint": "npm run lint --workspace=@hvacflow/api && npm run lint --workspace=@hvacflow/web",
+    "typecheck": "npm run build:shared && npm run typecheck --workspace=@hvacflow/shared-types && npm run typecheck --workspace=@hvacflow/api && npm run typecheck --workspace=@hvacflow/web",
+    "test": "npm run test --workspace=@hvacflow/api",
     "db:generate": "prisma generate --schema=./prisma/schema.prisma",
     "db:migrate": "prisma migrate dev --schema=./prisma/schema.prisma",
     "db:migrate:deploy": "prisma migrate deploy --schema=./prisma/schema.prisma",
     "db:seed": "ts-node --project tsconfig.seed.json prisma/seed.ts",
     "db:studio": "prisma studio --schema=./prisma/schema.prisma",
-    "db:reset": "prisma migrate reset --schema=./prisma/schema.prisma"
+    "db:reset": "prisma migrate reset --schema=./prisma/schema.prisma",
+    "build:shared": "npm --workspace @hvacflow/shared-types run build",
+    "dev:apps": "concurrently --kill-others --names API,WEB \"npm --workspace @hvacflow/api run dev\" \"npm --workspace @hvacflow/web run dev\"",
+    "dev:shared": "npm run dev --workspace=@hvacflow/shared-types",
+    "dev:api": "npm run dev --workspace=@hvacflow/api",
+    "dev:web": "npm run dev --workspace=@hvacflow/web"
   },
   "devDependencies": {
-    "turbo": "^2.3.3",
-    "typescript": "^5.7.3",
-    "prettier": "^3.4.2",
-    "@types/node": "^22.10.5",
-    "ts-node": "^10.9.2",
-    "prisma": "^6.0.0",
-    "bcrypt": "^5.1.1",
+    "@prisma/client": "^6.0.0",
     "@types/bcrypt": "^5.0.2",
-    "@prisma/client": "^6.0.0"
+    "@types/node": "^22.10.5",
+    "bcrypt": "^5.1.1",
+    "concurrently": "^10.0.3",
+    "prettier": "^3.4.2",
+    "prisma": "^6.0.0",
+    "ts-node": "^10.9.2",
+    "turbo": "^2.3.3",
+    "typescript": "^5.7.3"
   },
   "engines": {
     "node": ">=22.0.0",

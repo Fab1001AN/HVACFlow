@@ -173,8 +173,8 @@ export class ProductionTasksService {
   async complete(id: string, userId: string, dto: TaskActionDto) {
     const task = await this.findOne(id);
 
-    if (task.status !== TaskStatus.InProgress) {
-      throw new ConflictException(`Task is ${task.status}, expected InProgress`);
+    if (task.status !== TaskStatus.Ready && task.status !== TaskStatus.InProgress) {
+      throw new ConflictException(`Task is ${task.status}, expected Ready or InProgress`);
     }
 
     // Validate checklist completion
@@ -420,6 +420,13 @@ export class ProductionTasksService {
         include: this.taskIncludes(),
       });
       if (nextTask) {
+        const unitId = nextTask.unitId ?? nextTask.part?.unitId;
+        if (unitId) {
+          await this.prisma.unit.update({
+            where: { id: unitId },
+            data: { currentDepartmentId: nextTask.departmentId, currentStage: nextTask.processDefinition.name },
+          });
+        }
         this.realtime.emitTaskStatusChanged(nextTask.departmentId, nextTaskId, {
           taskId: nextTaskId,
           fromStatus: TaskStatus.Pending,

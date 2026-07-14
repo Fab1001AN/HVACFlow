@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException, ConflictException, BadRequestException } from '@nestjs/common';
 import { Controller, Get, Post, Patch, Delete, Body, Param, Query, Module } from '@nestjs/common';
-import { IsString, IsOptional, IsUUID, IsObject, IsInt, Min } from 'class-validator';
+import { IsString, IsOptional, IsUUID, IsObject, IsInt, Min, IsArray, ArrayMinSize } from 'class-validator';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { WorkflowProgressService } from '../workflow-progress/workflow-progress.service';
@@ -20,6 +20,12 @@ class CreatePartDto {
   @IsString() identifier: string;
   @IsOptional() @IsInt() @Min(1) quantity?: number = 1;
   @IsOptional() @IsObject() specifications?: Record<string, unknown>;
+}
+
+
+class ReplacePartRouteDto {
+  @IsArray() @ArrayMinSize(1) processDefinitionIds: string[];
+  @IsString() reason: string;
 }
 
 class UpdatePartDto {
@@ -140,6 +146,28 @@ export class PartsService {
   });
 }
 
+
+  async replacePendingRoute(id: string, dto: ReplacePartRouteDto, userId: string) {
+    const part = await this.findOne(id);
+    const completed = part.tasks.filter((task) => ['Completed', 'PendingVerification', 'InProgress'].includes(task.status));
+    const lockedMax = completed.length ? Math.max(...completed.map((task) => task.sequenceOrder)) : 0;
+    const priorityLevelId = part.unit.priorityLevelId ?? part.unit.order?.priorityLevelId;
+    if (!priorityLevelId) throw new BadRequestException('Unit has no priority level');
+    const definitions = await this.prisma.processDefinition.findMany({ where: { id: { in: dto.processDefinitionIds }, isActive: true } });
+    if (definitions.length !== dto.processDefinitionIds.length) throw new BadRequestException('One or more route processes are invalid or inactive');
+    await this.prisma.$transaction(async (tx) => {
+      await tx.productionTask.deleteMany({ where: { partId: id, sequenceOrder: { gt: lockedMax }, status: 'Pending' } });
+      let previousTaskId = completed.sort((a,b)=>a.sequenceOrder-b.sequenceOrder).at(-1)?.id ?? null;
+      for (let i=0;i<dto.processDefinitionIds.length;i++) {
+        const def=definitions.find((d)=>d.id===dto.processDefinitionIds[i])!;
+        const task=await tx.productionTask.create({ data: { partId:id, departmentId:def.departmentId, processDefinitionId:def.id, sequenceOrder:lockedMax+i+1, status: previousTaskId ? 'Pending' : 'Ready', priorityLevelId:def.defaultPriorityLevelId??priorityLevelId, estimatedDurationMinutes:def.defaultEstimatedMinutes, parentTaskId:previousTaskId, notes:`Route changed: ${dto.reason}`, createdByUserId:userId, updatedByUserId:userId } });
+        if(previousTaskId) await tx.productionTask.update({where:{id:previousTaskId},data:{nextTaskId:task.id}});
+        previousTaskId=task.id;
+      }
+    });
+    return this.findOne(id);
+  }
+
   async remove(id: string) {
     const part = await this.findOne(id);
     const inProgressCount = await this.prisma.productionTask.count({
@@ -182,6 +210,13 @@ export class PartsController {
   @RequirePermissions('part:manage')
   update(@Param('id') id: string, @Body() dto: UpdatePartDto) {
     return this.service.update(id, dto);
+  }
+
+
+  @Patch('parts/:id/route')
+  @RequirePermissions('part:manage')
+  replaceRoute(@Param('id') id: string, @Body() dto: ReplacePartRouteDto, @CurrentUser() user: JwtPayload) {
+    return this.service.replacePendingRoute(id, dto, user.sub);
   }
 
   @Delete('parts/:id')

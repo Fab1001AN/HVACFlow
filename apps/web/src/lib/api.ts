@@ -258,6 +258,8 @@ export const api = {
     list: (params?: any) => api.get<any>('/units', { params }),
     calendar: (params?: { from?: string; to?: string }) => api.get<any[]>('/units/calendar', { params }),
     directorSummary: () => api.get<any>('/units/director-summary'),
+    managerSummary: () => api.get<any>('/units/manager-summary'),
+    engineeringQueue: () => api.get<any[]>('/units/engineering-queue'),
     listByOrder: (orderId: string, params?: any) =>
       api.get<any>(`/orders/${orderId}/units`, { params }),
     get: (id: string) => api.get<any>(`/units/${id}`),
@@ -265,8 +267,11 @@ export const api = {
     create: (orderId: string, body: any) =>
       api.post<any>(`/orders/${orderId}/units`, body),
     update: (id: string, body: any) => api.patch<any>(`/units/${id}`, body),
-    move: (id: string, body: { plannedStartDate: string; priorityPosition: number }) =>
+    move: (id: string, body: { productionMonth: string; priorityPosition: number }) =>
       api.patch<any>(`/units/${id}/move`, body),
+    advanceEngineering: (id: string) => api.post<any>(`/units/${id}/engineering/advance`, {}),
+    release: (id: string) => api.post<any>(`/units/${id}/release`, {}),
+    startManufacturing: (id: string) => api.post<any>(`/units/${id}/start-manufacturing`, {}),
     addComment: (id: string, body: { message: string; isDelay?: boolean }) =>
       api.post<any>(`/units/${id}/comments`, body),
     getAllTasks: (id: string) => api.get<any[]>(`/units/${id}/tasks`),
@@ -279,6 +284,7 @@ export const api = {
     create: (unitId: string, body: any) =>
       api.post<any>(`/units/${unitId}/parts`, body),
     update: (id: string, body: any) => api.patch<any>(`/parts/${id}`, body),
+    replaceRoute: (id: string, processDefinitionIds: string[], reason: string) => api.patch<any>(`/parts/${id}/route`, { processDefinitionIds, reason }),
   },
 
   // ─── Production Tasks ────────────────────────────────────────────────────

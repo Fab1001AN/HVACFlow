@@ -33,6 +33,23 @@ enum OrderStatus {
   Cancelled
 }
 
+enum EngineeringStatus {
+  NotStarted
+  SubmittalReceived
+  DesigningStarted
+  UnitDesignCompleted
+  DrawingsCompleted
+  ProgrammingCompleted
+  ReleasedToManufacturing
+}
+
+enum ProductionReleaseStatus {
+  AwaitingRelease
+  Released
+  Started
+  OnHold
+}
+
 enum UnitStatus {
   Planned
   InProgress
@@ -280,10 +297,16 @@ model Unit {
   serialNumber             String     @unique
   displayName              String?
   specifications           Json?
-  plannedStartDate         DateTime?
+  plannedStartDate         DateTime? // legacy; no longer used by planning UI
+  productionMonth          DateTime?
   dueDate                  DateTime?
   priorityPosition         Int        @default(0)
   currentStage             String?
+  engineeringStatus        EngineeringStatus @default(NotStarted)
+  productionReleaseStatus  ProductionReleaseStatus @default(AwaitingRelease)
+  releasedAt               DateTime?
+  releasedByUserId         String?
+  manufacturingStartedAt   DateTime?
   isBlocked                Boolean    @default(false)
   holdReason               String?
   oneDriveFolderUrl        String?
@@ -312,6 +335,9 @@ model Unit {
   @@index([priorityLevelId])
   @@index([currentDepartmentId])
   @@index([plannedStartDate])
+  @@index([productionMonth])
+  @@index([engineeringStatus])
+  @@index([productionReleaseStatus])
   @@index([dueDate])
   @@index([status])
   @@map("units")
@@ -390,6 +416,7 @@ model ProcessDefinition {
   defaultPriorityLevelId   String?
   weight                   Decimal    @default(1.0) @db.Decimal(5, 2)
   isActive                 Boolean    @default(true)
+  isOptional               Boolean    @default(false)
   createdAt                DateTime   @default(now())
   updatedAt                DateTime   @updatedAt
 

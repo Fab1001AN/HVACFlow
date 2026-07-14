@@ -154,9 +154,7 @@ async function main() {
 
   const departmentData = [
     { name: 'Engineering', code: 'ENG', color: '#0ea5e9', sortOrder: 1 },
-    { name: 'Design & Programming', code: 'DESIGN', color: '#2563eb', sortOrder: 2 },
     { name: 'Fabrication', code: 'FAB', color: '#6366f1', sortOrder: 3 },
-    { name: 'Foaming', code: 'FOAM', color: '#f59e0b', sortOrder: 4 },
     { name: 'Assembly', code: 'ASSY', color: '#10b981', sortOrder: 5 },
     { name: 'Electrical', code: 'ELEC', color: '#8b5cf6', sortOrder: 6 },
     { name: 'Piping', code: 'PIPE', color: '#06b6d4', sortOrder: 7 },
@@ -185,9 +183,9 @@ async function main() {
     { name: 'Bending', code: 'BEND', departmentId: departments['FAB'], appliesTo: AppliesTo.PART, requiresVerification: false, requiresChecklist: false, weight: 1.0, defaultEstimatedMinutes: 45 },
     { name: 'Punching', code: 'PUNCH', departmentId: departments['FAB'], appliesTo: AppliesTo.PART, requiresVerification: false, requiresChecklist: false, weight: 0.5, defaultEstimatedMinutes: 20 },
     // Foaming (Part-level)
-    { name: 'Foaming', code: 'FOAM', departmentId: departments['FOAM'], appliesTo: AppliesTo.PART, requiresVerification: false, requiresChecklist: true, weight: 1.5, defaultEstimatedMinutes: 60 },
+    { name: 'Foaming', code: 'FOAM', departmentId: departments['FAB'], appliesTo: AppliesTo.PART, requiresVerification: false, requiresChecklist: true, weight: 1.5, defaultEstimatedMinutes: 60 },
     // Assembly (Part-level)
-    { name: 'Sub-Assembly', code: 'SUBASSY', departmentId: departments['ASSY'], appliesTo: AppliesTo.PART, requiresVerification: false, requiresChecklist: false, weight: 1.0, defaultEstimatedMinutes: 45 },
+    { name: 'Sub-Assembly', code: 'SUBASSY', departmentId: departments['ASSY'], appliesTo: AppliesTo.PART, requiresVerification: false, requiresChecklist: false, isOptional: true, weight: 1.0, defaultEstimatedMinutes: 45 },
     { name: 'Assembly', code: 'ASSY', departmentId: departments['ASSY'], appliesTo: AppliesTo.PART, requiresVerification: true, requiresChecklist: true, weight: 2.0, defaultEstimatedMinutes: 90 },
     // Electrical (Part-level)
     { name: 'Electrical Wiring', code: 'ELEC', departmentId: departments['ELEC'], appliesTo: AppliesTo.PART, requiresVerification: true, requiresChecklist: true, weight: 2.0, defaultEstimatedMinutes: 120 },
