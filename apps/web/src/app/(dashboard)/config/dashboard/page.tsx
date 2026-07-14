@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { PageHeader, Button, Spinner, Card, Select } from '@/components/shared';
@@ -8,7 +8,6 @@ import { toast } from '@/components/shared';
 
 export default function DashboardConfigPage() {
   const queryClient = useQueryClient();
-  const [saving, setSaving] = useState<string | null>(null);
 
   const { data: roles = [], isLoading } = useQuery({
     queryKey: ['roles'],
@@ -19,17 +18,6 @@ export default function DashboardConfigPage() {
     queryKey: ['departments'],
     queryFn: () => api.departments.list({ isActive: true }),
     staleTime: Infinity,
-  });
-
-  const updateMutation = useMutation({
-    mutationFn: ({ roleId, config }: { roleId: string; config: any }) =>
-      api.dashboard.updatePreferences(config),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['dashboard-config'] });
-      setSaving(null);
-      toast('Dashboard defaults updated', 'success');
-    },
-    onError: (err: any) => { setSaving(null); toast(err.message, 'error'); },
   });
 
   return (
@@ -48,8 +36,7 @@ export default function DashboardConfigPage() {
               key={role.id}
               role={role}
               departments={departments as any[]}
-              onSave={(config) => updateMutation.mutate({ roleId: role.id, config })}
-              saving={saving === role.id}
+              queryClient={queryClient}
             />
           ))
         )}
@@ -61,25 +48,54 @@ export default function DashboardConfigPage() {
 function RoleDashboardConfig({
   role,
   departments,
-  onSave,
-  saving,
+  queryClient,
 }: {
   role: any;
   departments: any[];
-  onSave: (config: any) => void;
-  saving: boolean;
+  queryClient: ReturnType<typeof useQueryClient>;
 }) {
-  const { data: config } = useQuery({
-    queryKey: ['dashboard-config', role.id],
-    queryFn: () => api.dashboard.getPreferences(),
+  const { data: roleConfig, isLoading } = useQuery({
+    queryKey: ['dashboard-role-config', role.id],
+    queryFn: () => api.dashboard.getRoleConfig(role.id),
     staleTime: 30_000,
   });
 
+  const config = (roleConfig?.config as Record<string, unknown>) ?? {};
+
   const [form, setForm] = useState({
-    defaultView: (config?.defaultView as string) ?? 'kanban',
-    defaultDepartmentFilter: (config?.defaultDepartmentFilter as string) ?? 'mine',
-    allowCrossDepartmentView: (config?.allowCrossDepartmentView as boolean) ?? false,
+    defaultView: (config.defaultView as string) ?? 'kanban',
+    defaultDepartmentFilter: (config.defaultDepartmentFilter as string) ?? 'mine',
+    allowCrossDepartmentView: (config.allowCrossDepartmentView as boolean) ?? false,
   });
+
+  // Re-sync local form state once this role's config actually loads
+  useEffect(() => {
+    if (roleConfig) {
+      const c = (roleConfig.config as Record<string, unknown>) ?? {};
+      setForm({
+        defaultView: (c.defaultView as string) ?? 'kanban',
+        defaultDepartmentFilter: (c.defaultDepartmentFilter as string) ?? 'mine',
+        allowCrossDepartmentView: (c.allowCrossDepartmentView as boolean) ?? false,
+      });
+    }
+  }, [roleConfig]);
+
+  const saveMutation = useMutation({
+    mutationFn: (body: any) => api.dashboard.updateRoleConfig(role.id, body),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['dashboard-role-config', role.id] });
+      toast(`${role.name} dashboard defaults updated`, 'success');
+    },
+    onError: (err: any) => toast(err.message, 'error'),
+  });
+
+  if (isLoading) {
+    return (
+      <Card className="p-4 flex items-center justify-center h-24">
+        <Spinner className="w-5 h-5" />
+      </Card>
+    );
+  }
 
   return (
     <Card className="p-4 space-y-4">
@@ -110,7 +126,7 @@ function RoleDashboardConfig({
       </label>
 
       <div className="flex justify-end">
-        <Button size="sm" loading={saving} onClick={() => onSave({ roleId: role.id, ...form })}>
+        <Button size="sm" loading={saveMutation.isPending} onClick={() => saveMutation.mutate(form)}>
           Save Defaults
         </Button>
       </div>

@@ -1,10 +1,11 @@
-import { Controller, Post, Get, Body, UseGuards, Request } from '@nestjs/common';
+import { Controller, Post, Get, Body, UseGuards, Request, Param } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { AuthService } from './auth.service';
 import { LoginDto, RefreshTokenDto } from './dto/auth.dto';
 import { Public } from '../../common/decorators/public.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
 import { JwtPayload } from '@hvacflow/shared-types';
 
 @ApiTags('Auth')
@@ -32,6 +33,14 @@ export class AuthController {
   @ApiOperation({ summary: 'Get current authenticated user profile' })
   async me(@CurrentUser() user: JwtPayload) {
     return this.authService.getMe(user.sub);
+  }
+
+  @Post('impersonate/:userId')
+  @ApiBearerAuth()
+  @RequirePermissions('user:manage')
+  @ApiOperation({ summary: "Admin: mint a short-lived, read-only token to preview another user's dashboard" })
+  async impersonate(@Param('userId') userId: string, @CurrentUser() admin: JwtPayload) {
+    return this.authService.impersonate(admin.sub, userId);
   }
 
   @Post('logout')

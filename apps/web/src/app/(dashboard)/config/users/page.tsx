@@ -4,14 +4,20 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { PageHeader, Button, Modal, Input, EmptyState, Spinner, Card, Avatar } from '@/components/shared';
-import { Plus, Pencil, Users } from 'lucide-react';
+import { Plus, Pencil, Trash2, Users, Eye } from 'lucide-react';
 import { toast } from '@/components/shared';
 import { cn } from '@/lib/utils';
+import { useAuthStore } from '@/store/auth.store';
+import { useRouter } from 'next/navigation';
 
 const EMPTY_FORM = { name: '', email: '', password: '', isActive: true };
 
 export default function UsersPage() {
   const queryClient = useQueryClient();
+  const router = useRouter();
+  const currentUser = useAuthStore((s) => s.user);
+  const viewAs = useAuthStore((s) => s.viewAs);
+  const [viewAsLoadingId, setViewAsLoadingId] = useState<string | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<any>(null);
   const [form, setForm] = useState({ ...EMPTY_FORM });
@@ -42,6 +48,27 @@ export default function UsersPage() {
     },
     onError: (err: any) => toast(err.message, 'error'),
   });
+
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) => api.users.delete(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['users'] });
+      toast('User deleted', 'success');
+    },
+    onError: (err: any) => toast(err.message, 'error'),
+  });
+
+  const handleViewAs = async (user: any) => {
+    setViewAsLoadingId(user.id);
+    try {
+      await viewAs(user.id);
+      router.push('/mission-control');
+    } catch (err: any) {
+      toast(err.message ?? 'Could not start preview', 'error');
+    } finally {
+      setViewAsLoadingId(null);
+    }
+  };
 
   const openCreate = () => {
     setEditing(null);
@@ -135,9 +162,38 @@ export default function UsersPage() {
                       </span>
                     </td>
                     <td className="px-4 py-3">
-                      <Button variant="ghost" size="sm" className="opacity-0 group-hover:opacity-100" onClick={() => openEdit(user)}>
-                        <Pencil className="w-3.5 h-3.5" />
-                      </Button>
+                      <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          disabled={user.id === currentUser?.id || !user.isActive || viewAsLoadingId === user.id}
+                          title={
+                            user.id === currentUser?.id
+                              ? "That's you"
+                              : !user.isActive
+                                ? "Can't preview an inactive user"
+                                : `Preview ${user.name}'s dashboard (read-only)`
+                          }
+                          onClick={() => handleViewAs(user)}
+                        >
+                          <Eye className="w-3.5 h-3.5" />
+                        </Button>
+                        <Button variant="ghost" size="sm" onClick={() => openEdit(user)}>
+                          <Pencil className="w-3.5 h-3.5" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="text-destructive hover:text-destructive disabled:opacity-30 disabled:pointer-events-none"
+                          disabled={user.id === currentUser?.id}
+                          title={user.id === currentUser?.id ? "You can't delete your own account" : 'Delete user'}
+                          onClick={() => {
+                            if (confirm(`Delete ${user.name}? This cannot be undone.`)) deleteMutation.mutate(user.id);
+                          }}
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </Button>
+                      </div>
                     </td>
                   </tr>
                 ))}

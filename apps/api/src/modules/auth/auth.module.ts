@@ -8,6 +8,7 @@ import { JwtStrategy } from './strategies/jwt.strategy';
 import { LocalStrategy } from './strategies/local.strategy';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../../common/guards/permissions.guard';
+import { ImpersonationGuard } from '../../common/guards/impersonation.guard';
 
 @Module({
   imports: [
@@ -23,6 +24,8 @@ import { PermissionsGuard } from '../../common/guards/permissions.guard';
     { provide: APP_GUARD, useClass: JwtAuthGuard },
     // Apply permissions guard globally — use @RequirePermissions() to declare requirements
     { provide: APP_GUARD, useClass: PermissionsGuard },
+    // Blocks writes globally when the token is a read-only "view as" preview
+    { provide: APP_GUARD, useClass: ImpersonationGuard },
   ],
   exports: [AuthService],
 })
