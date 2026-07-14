@@ -135,6 +135,42 @@ export class UsersService {
     return this.findOne(id);
   }
 
+  async remove(id: string, requestingUserId: string) {
+    await this.findOne(id);
+
+    if (id === requestingUserId) {
+      throw new BadRequestException('You cannot delete your own account');
+    }
+
+    // Guard against removing the last active user with a role that has admin-level access
+    // (config:manage is the permission that gates user/role/department management).
+    const targetRoles = await this.prisma.userRole.findMany({
+      where: { userId: id },
+      include: { role: { include: { permissions: { include: { permission: true } } } } },
+    });
+    const targetIsAdmin = targetRoles.some((ur) =>
+      ur.role.permissions.some((rp) => rp.permission.code === 'config:manage'),
+    );
+    if (targetIsAdmin) {
+      const otherAdmins = await this.prisma.user.count({
+        where: {
+          id: { not: id },
+          deletedAt: null,
+          roles: { some: { role: { permissions: { some: { permission: { code: 'config:manage' } } } } } },
+        },
+      });
+      if (otherAdmins === 0) {
+        throw new ConflictException('Cannot delete the last administrator account');
+      }
+    }
+
+    return this.prisma.user.update({
+      where: { id },
+      data: { deletedAt: new Date(), isActive: false },
+      select: { id: true, name: true, email: true, deletedAt: true },
+    });
+  }
+
   async setDepartments(id: string, dto: SetUserDepartmentsDto) {
     await this.findOne(id);
     await this.prisma.userDepartment.deleteMany({ where: { userId: id } });
@@ -270,6 +306,12 @@ export class UsersController {
   @RequirePermissions('user:manage')
   resetPassword(@Param('id') id: string, @Body() dto: ResetPasswordDto) {
     return this.service.resetPassword(id, dto);
+  }
+
+  @Delete(':id')
+  @RequirePermissions('user:manage')
+  remove(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
+    return this.service.remove(id, user.sub);
   }
 }
 

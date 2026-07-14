@@ -40,6 +40,39 @@ export function clearTokens() {
   localStorage.removeItem('hvacflow:refresh_token');
 }
 
+function isImpersonating(): boolean {
+  if (typeof window === 'undefined') return false;
+  return localStorage.getItem('hvacflow:impersonating') === 'true';
+}
+
+// Stash the admin's real tokens and swap in a short-lived, read-only
+// preview token for the target user. No refresh token is stored while
+// impersonating — the preview session simply expires after 30 minutes.
+export function beginImpersonation(previewAccessToken: string) {
+  const adminAccessToken = localStorage.getItem('hvacflow:access_token');
+  const adminRefreshToken = localStorage.getItem('hvacflow:refresh_token');
+  if (adminAccessToken) localStorage.setItem('hvacflow:admin_access_token', adminAccessToken);
+  if (adminRefreshToken) localStorage.setItem('hvacflow:admin_refresh_token', adminRefreshToken);
+  localStorage.setItem('hvacflow:impersonating', 'true');
+  localStorage.setItem('hvacflow:access_token', previewAccessToken);
+  localStorage.removeItem('hvacflow:refresh_token');
+}
+
+// Restores the admin's real session. Returns false if no admin session
+// was stashed (shouldn't normally happen) so the caller can fall back
+// to a full logout.
+export function endImpersonation(): boolean {
+  const accessToken = localStorage.getItem('hvacflow:admin_access_token');
+  const refreshToken = localStorage.getItem('hvacflow:admin_refresh_token');
+  localStorage.removeItem('hvacflow:admin_access_token');
+  localStorage.removeItem('hvacflow:admin_refresh_token');
+  localStorage.removeItem('hvacflow:impersonating');
+  if (!accessToken || !refreshToken) return false;
+  localStorage.setItem('hvacflow:access_token', accessToken);
+  localStorage.setItem('hvacflow:refresh_token', refreshToken);
+  return true;
+}
+
 async function refreshAccessToken(): Promise<string | null> {
   const refreshToken = localStorage.getItem('hvacflow:refresh_token');
   if (!refreshToken) return null;
@@ -66,6 +99,10 @@ async function request<T>(
   body?: unknown,
   options?: RequestOptions,
 ): Promise<T> {
+  if (isImpersonating() && method !== 'GET') {
+    throw new ApiError(403, "This is a read-only preview of another user's dashboard. Exit preview to make changes.");
+  }
+
   const url = buildUrl(path, options?.params);
   let token = getToken();
 
@@ -84,6 +121,16 @@ async function request<T>(
 
   // Auto-refresh on 401
   if (res.status === 401 && token) {
+    if (isImpersonating()) {
+      // Preview token expired — fall back to the admin's real session
+      // instead of logging everyone out.
+      const restored = endImpersonation();
+      if (typeof window !== 'undefined') {
+        window.location.href = restored ? '/config/users?previewExpired=1' : '/login';
+      }
+      throw new Error('Preview session expired');
+    }
+
     const newToken = await refreshAccessToken();
     if (newToken) {
       token = newToken;
@@ -140,6 +187,8 @@ export const api = {
       api.post<{ tokens: { accessToken: string; refreshToken: string }; user: any }>('/auth/login', { email, password }),
     me: () => api.get<any>('/auth/me'),
     logout: () => api.post('/auth/logout'),
+    impersonate: (userId: string) =>
+      api.post<{ accessToken: string; user: any; impersonatedBy: { id: string; name: string } }>(`/auth/impersonate/${userId}`),
   },
 
   // ─── Configuration ───────────────────────────────────────────────────────
@@ -307,6 +356,7 @@ export const api = {
       api.patch<any>(`/users/${id}/departments`, { departments }),
     resetPassword: (id: string, newPassword: string) =>
       api.post(`/users/${id}/reset-password`, { newPassword }),
+    delete: (id: string) => api.delete(`/users/${id}`),
   },
 
   roles: {
@@ -327,6 +377,8 @@ export const api = {
   dashboard: {
     getPreferences: () => api.get<any>('/dashboard/preferences'),
     updatePreferences: (body: any) => api.patch<any>('/dashboard/preferences', body),
+    getRoleConfig: (roleId: string) => api.get<any>(`/dashboard/role-config/${roleId}`),
+    updateRoleConfig: (roleId: string, config: any) => api.patch<any>(`/dashboard/role-config/${roleId}`, config),
   },
 
   // ─── Reports ─────────────────────────────────────────────────────────────

@@ -40,7 +40,15 @@ export class DashboardService {
     missionControlLayout: {},
   };
 
-  async getPreferences(userId: string, roleIds: string[]) {
+  async getPreferences(userId: string) {
+    // Look up the user's role IDs directly — the JWT payload only carries
+    // flattened permission codes, not role IDs, so we can't rely on the token.
+    const userRoles = await this.prisma.userRole.findMany({
+      where: { userId },
+      select: { roleId: true },
+    });
+    const roleIds = userRoles.map((ur) => ur.roleId);
+
     // Get role-level defaults
     const roleConfigs = await this.prisma.roleDashboardConfig.findMany({
       where: { roleId: { in: roleIds } },
@@ -99,9 +107,7 @@ export class DashboardController {
 
   @Get('preferences')
   async getPreferences(@CurrentUser() user: JwtPayload) {
-    // Extract role IDs from the user's token — we need to look them up
-    // The preferences service handles the role config lookup
-    return this.service.getPreferences(user.sub, []);
+    return this.service.getPreferences(user.sub);
   }
 
   @Patch('preferences')
