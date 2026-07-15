@@ -30,6 +30,12 @@ export default function DirectorDashboardPage() {
   const totals = data?.totals ?? {};
   const units = data?.units ?? [];
 
+  // Upcoming: hasn't started production yet (still in Engineering, or
+  // released/planned/handed-off but no department has actually begun
+  // work). WIP: actively in production (Started).
+  const upcomingUnits = units.filter((u: any) => u.productionReleaseStatus !== 'Started');
+  const wipUnits = units.filter((u: any) => u.productionReleaseStatus === 'Started');
+
   const cards = [
     { label: 'Active Units', value: totals.active ?? 0, icon: Boxes, className: 'text-blue-400 bg-blue-500/10' },
     { label: 'Blocked', value: totals.blocked ?? 0, icon: AlertTriangle, className: 'text-red-400 bg-red-500/10' },
@@ -52,26 +58,12 @@ export default function DirectorDashboardPage() {
         </div>
 
         <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
-          <Card className="xl:col-span-2 overflow-hidden">
-            <div className="px-4 py-3 border-b border-border"><h2 className="text-sm font-semibold">Units requiring attention</h2></div>
-            {!units.length ? <EmptyState title="No active units" /> : (
-              <div className="divide-y divide-border">
-                {units.slice(0, 20).map((unit: any) => {
-                  const overdue = unit.dueDate && new Date(unit.dueDate) < new Date();
-                  return (
-                    <Link key={unit.id} href={`/units/${unit.id}`} className="flex items-center gap-4 px-4 py-3 hover:bg-accent/40">
-                      <div className={cn('w-2 h-10 rounded-full', unit.isBlocked ? 'bg-red-500' : overdue ? 'bg-amber-500' : 'bg-blue-500')} />
-                      <div className="flex-1 min-w-0"><div className="flex items-center gap-2"><span className="font-medium text-sm">{unit.serialNumber}</span><Badge variant="outline">{unit.unitType?.code}</Badge>{unit.isBlocked && <Badge className="bg-red-500/10 text-red-400">Blocked</Badge>}</div><p className="text-xs text-muted-foreground truncate mt-0.5">{unit.holdReason || unit.currentStage || unit.currentDepartment?.name || 'Engineering'}</p></div>
-                      <div className="w-36 hidden md:block"><ProgressBar value={Number(unit.progressPercentage)} showLabel size="sm" /></div>
-                      <div className="text-right text-xs text-muted-foreground w-20">{unit.dueDate ? format(new Date(unit.dueDate), 'MMM d') : 'No due date'}</div>
-                    </Link>
-                  );
-                })}
-              </div>
-            )}
-          </Card>
+          <div className="xl:col-span-2 space-y-6">
+            <UnitListCard title="Upcoming Units" description="Not yet started in production" units={upcomingUnits} />
+            <UnitListCard title="WIP Units" description="Actively in production" units={wipUnits} />
+          </div>
 
-          <Card className="overflow-hidden">
+          <Card className="overflow-hidden h-fit">
             <div className="px-4 py-3 border-b border-border flex items-center gap-2"><Factory className="w-4 h-4" /><h2 className="text-sm font-semibold">Department workload</h2></div>
             <div className="p-4 space-y-4">
               {(data?.departmentLoad ?? []).map((row: any) => {
@@ -84,5 +76,43 @@ export default function DirectorDashboardPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+function UnitListCard({ title, description, units }: { title: string; description: string; units: any[] }) {
+  return (
+    <Card className="overflow-hidden">
+      <div className="px-4 py-3 border-b border-border flex items-center justify-between">
+        <div>
+          <h2 className="text-sm font-semibold">{title}</h2>
+          <p className="text-xs text-muted-foreground">{description}</p>
+        </div>
+        <Badge variant="muted">{units.length}</Badge>
+      </div>
+      {!units.length ? <div className="p-6"><EmptyState title="Nothing here" /></div> : (
+        <div className="divide-y divide-border">
+          {units.slice(0, 20).map((unit: any) => {
+            const overdue = unit.dueDate && new Date(unit.dueDate) < new Date();
+            return (
+              <Link key={unit.id} href={`/units/${unit.id}`} className="flex items-center gap-4 px-4 py-3 hover:bg-accent/40">
+                <div className={cn('w-2 h-10 rounded-full', unit.isBlocked ? 'bg-red-500' : overdue ? 'bg-amber-500' : 'bg-blue-500')} />
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2"><span className="font-medium text-sm">{unit.serialNumber}</span><Badge variant="outline">{unit.unitType?.code}</Badge>{unit.isBlocked && <Badge className="bg-red-500/10 text-red-400">Blocked</Badge>}</div>
+                  <p className="text-xs text-muted-foreground truncate mt-0.5">{unit.holdReason || unit.currentStage || unit.currentDepartment?.name || 'Engineering'}</p>
+                  {unit.latestDelayComment && (
+                    <p className="text-xs text-amber-500 truncate mt-0.5 flex items-center gap-1">
+                      <AlertTriangle className="w-3 h-3 flex-shrink-0" />
+                      {unit.latestDelayComment.userName}: {unit.latestDelayComment.message}
+                    </p>
+                  )}
+                </div>
+                <div className="w-36 hidden md:block"><ProgressBar value={Number(unit.progressPercentage)} showLabel size="sm" /></div>
+                <div className="text-right text-xs text-muted-foreground w-20">{unit.dueDate ? format(new Date(unit.dueDate), 'MMM d') : 'No due date'}</div>
+              </Link>
+            );
+          })}
+        </div>
+      )}
+    </Card>
   );
 }
