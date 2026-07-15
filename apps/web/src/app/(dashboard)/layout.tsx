@@ -17,7 +17,6 @@ const NAV_ITEMS = [
   { href: '/director-dashboard', label: 'Director Dashboard', icon: BarChart3, permission: 'director:view' },
   { href: '/manager-dashboard', label: 'Manager Dashboard', icon: ClipboardList },
   { href: '/engineering-dashboard', label: 'Engineering Manager', icon: Wrench },
-  { href: '/department-work', label: 'Department Work', icon: Factory },
 ];
 
 const CONFIG_ITEMS = [

@@ -1,17 +1,16 @@
 'use client';
 
-import { useState, useCallback } from 'react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useState, useCallback, useEffect } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { useAuthStore } from '@/store/auth.store';
 import { TaskStatus } from '@hvacflow/shared-types';
 import { cn, STATUS_BG, STATUS_LABELS } from '@/lib/utils';
 import { TaskCard } from '@/features/mission-control/task-card';
 import { TaskDrawer } from '@/features/tasks/task-drawer';
-import { Spinner, EmptyState, Button, Avatar } from '@/components/shared';
+import { Spinner, EmptyState, Button, Avatar, Card, Badge, toast } from '@/components/shared';
 import { useWsEvent } from '@/lib/websocket';
-import { LayoutGrid, List, Filter, RefreshCw } from 'lucide-react';
-import { useQuery as useRQ } from '@tanstack/react-query';
+import { LayoutGrid, List, Filter, RefreshCw, Rocket } from 'lucide-react';
 
 type ViewMode = 'kanban' | 'list';
 
@@ -20,11 +19,25 @@ export default function MissionControlPage() {
   const queryClient = useQueryClient();
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>('kanban');
+
+  const canViewAll = hasPermission('task:view-all');
+  const assignedDepartmentIds = (user as any)?.departments?.map((d: any) => d.departmentId) as string[] | undefined;
+
   const [filters, setFilters] = useState({
     departmentId: '',
     priorityLevelId: '',
     mine: false,
   });
+
+  // If the user is scoped to specific department(s) (not task:view-all),
+  // default straight to their own department instead of a mixed board
+  // they may not even have data for.
+  useEffect(() => {
+    if (!canViewAll && assignedDepartmentIds?.length === 1 && !filters.departmentId) {
+      setFilters((f) => ({ ...f, departmentId: assignedDepartmentIds[0] }));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canViewAll, assignedDepartmentIds?.join(',')]);
 
   // Board data
   const { data: board, isLoading, refetch } = useQuery({
@@ -44,17 +57,42 @@ export default function MissionControlPage() {
     refetchInterval: 30_000,
   });
 
-  // Filter options
-  const { data: departments } = useQuery({
+  // Filter options - only departments the user can actually see data for.
+  const { data: allDepartments } = useQuery({
     queryKey: ['departments'],
     queryFn: () => api.departments.list({ isActive: true }),
     staleTime: Infinity,
   });
+  const departments = canViewAll || !assignedDepartmentIds?.length
+    ? allDepartments
+    : allDepartments?.filter((d: any) => assignedDepartmentIds.includes(d.id));
 
   const { data: priorityLevels } = useQuery({
     queryKey: ['priority-levels'],
     queryFn: () => api.priorityLevels.list({ isActive: true }),
     staleTime: Infinity,
+  });
+
+  // Units that have been released by a Manager but not yet started -
+  // their tasks sit in Pending status and are invisible to the board
+  // below until someone explicitly starts manufacturing. Without this,
+  // released units would be permanently stuck with no visible next step.
+  const canStartUnits = hasPermission('unit:manage');
+  const { data: managerSummary } = useQuery({
+    queryKey: ['manager-summary'],
+    queryFn: api.units.managerSummary,
+    enabled: canStartUnits,
+    refetchInterval: 30_000,
+  });
+  const releasedUnits = (managerSummary?.released ?? []) as any[];
+  const startMutation = useMutation({
+    mutationFn: (id: string) => api.units.startManufacturing(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['manager-summary'] });
+      queryClient.invalidateQueries({ queryKey: ['mission-control'] });
+      toast('Unit started - first routed steps are now ready on the board', 'success');
+    },
+    onError: (e: any) => toast(e.message, 'error'),
   });
 
   // Real-time board updates
@@ -121,6 +159,34 @@ export default function MissionControlPage() {
         </div>
       </div>
 
+      {/* ─── Released units awaiting start ──────────────────────── */}
+      {canStartUnits && releasedUnits.length > 0 && (
+        <div className="px-6 py-3 border-b border-border bg-primary/5 flex-shrink-0">
+          <div className="flex items-center gap-2 mb-2">
+            <Rocket className="w-3.5 h-3.5 text-primary" />
+            <span className="text-xs font-semibold text-foreground">Released — waiting to start ({releasedUnits.length})</span>
+          </div>
+          <div className="flex gap-2 overflow-x-auto pb-1">
+            {releasedUnits.map((u: any) => (
+              <Card key={u.id} className="p-2.5 flex-shrink-0 w-56">
+                <div className="flex items-center justify-between gap-2 mb-1.5">
+                  <span className="font-semibold text-sm">{u.serialNumber}</span>
+                  <Badge variant="muted">{u.unitType?.name}</Badge>
+                </div>
+                <Button
+                  size="sm"
+                  className="w-full"
+                  loading={startMutation.isPending && startMutation.variables === u.id}
+                  onClick={() => startMutation.mutate(u.id)}
+                >
+                  Start Entire Unit
+                </Button>
+              </Card>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* ─── Filters ─────────────────────────────────────────────── */}
       <div className="flex items-center gap-3 px-6 py-2.5 border-b border-border bg-card/50 flex-shrink-0 overflow-x-auto">
         <Filter className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" />
@@ -130,7 +196,7 @@ export default function MissionControlPage() {
           onChange={(e) => setFilters((f) => ({ ...f, departmentId: e.target.value }))}
           className="h-7 px-2 rounded border border-border bg-secondary text-foreground text-xs focus:outline-none focus:ring-1 focus:ring-primary/50"
         >
-          <option value="">All Departments</option>
+          <option value="">{canViewAll ? 'All Departments' : 'My Department(s)'}</option>
           {departments?.map((d: any) => (
             <option key={d.id} value={d.id}>{d.name}</option>
           ))}
