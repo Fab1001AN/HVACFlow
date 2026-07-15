@@ -89,15 +89,45 @@ export class UnitsService {
 
   async directorSummary() {
     const units = await this.prisma.unit.findMany({ where: { deletedAt: null, status: { notIn: ['Completed', 'Dispatched'] } }, include: this.unitSummaryInclude(), orderBy: [{ isBlocked: 'desc' }, { dueDate: 'asc' }, { priorityPosition: 'asc' }] });
+    const now = new Date();
+
+    // Department workload and the delayed/testing/readyToDispatch totals
+    // were referenced by the Director Dashboard UI but never actually
+    // computed here - the cards silently showed 0 and the workload panel
+    // was always empty. Filling these in properly rather than leaving
+    // dead frontend code pointed at nothing.
+    const openTaskCounts = await this.prisma.productionTask.groupBy({
+      by: ['departmentId'],
+      where: { status: { in: ['Ready', 'InProgress', 'PendingVerification'] } },
+      _count: { _all: true },
+    });
+    const departments = await this.prisma.department.findMany({
+      where: { id: { in: openTaskCounts.map((row) => row.departmentId) } },
+    });
+    const departmentLoad = openTaskCounts
+      .map((row) => ({
+        departmentId: row.departmentId,
+        openTasks: row._count._all,
+        department: departments.find((d) => d.id === row.departmentId),
+      }))
+      .sort((a, b) => b.openTasks - a.openTasks);
+
     return {
       totals: {
         active: units.length,
         blocked: units.filter((u) => u.isBlocked).length,
+        delayed: units.filter((u) => u.dueDate && u.dueDate < now).length,
+        testing: units.filter((u) => {
+          const name = u.currentDepartment?.name?.toLowerCase() ?? '';
+          return name.includes('testing') || name.includes('quality');
+        }).length,
+        readyToDispatch: units.filter((u) => u.currentDepartment?.name?.toLowerCase() === 'dispatch').length,
         awaitingRelease: units.filter((u) => u.productionReleaseStatus === ProductionReleaseStatus.AwaitingRelease).length,
         released: units.filter((u) => u.productionReleaseStatus === ProductionReleaseStatus.Released).length,
         inProduction: units.filter((u) => u.productionReleaseStatus === ProductionReleaseStatus.Started).length,
       },
       units,
+      departmentLoad,
     };
   }
 

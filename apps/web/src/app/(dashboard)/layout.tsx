@@ -13,7 +13,7 @@ import {
 
 const NAV_ITEMS = [
   { href: '/production-calendar', label: 'Production Calendar', icon: CalendarDays },
-  { href: '/director-dashboard', label: 'Director Dashboard', icon: BarChart3 },
+  { href: '/director-dashboard', label: 'Director Dashboard', icon: BarChart3, permission: 'director:view' },
   { href: '/manager-dashboard', label: 'Manager Dashboard', icon: ClipboardList },
   { href: '/engineering-dashboard', label: 'Engineering Manager', icon: Wrench },
   { href: '/department-work', label: 'Department Work', icon: Factory },
@@ -90,6 +90,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
   const canManageConfig = hasPermission('config:manage');
   const isConfigActive = pathname.startsWith('/config');
+  const visibleNavItems = navItems.filter((item: any) => !item.permission || hasPermission(item.permission));
 
   return (
     <div className="flex h-screen bg-background overflow-hidden">
@@ -118,7 +119,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
         {/* Navigation */}
         <nav className="flex-1 overflow-y-auto py-3 space-y-0.5 px-2">
-          {navItems.map((item) => {
+          {visibleNavItems.map((item) => {
             const Icon = item.icon;
             const active = pathname === item.href || pathname.startsWith(item.href + '/');
             return (
@@ -215,7 +216,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             onClick={(e) => e.stopPropagation()}
           >
             <nav className="flex-1 overflow-y-auto py-3 space-y-0.5 px-2">
-              {navItems.map((item) => {
+              {visibleNavItems.map((item) => {
                 const Icon = item.icon;
                 const active = pathname === item.href;
                 return (

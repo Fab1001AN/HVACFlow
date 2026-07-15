@@ -46,7 +46,7 @@ export class UnitsController {
   engineeringQueue() { return this.service.engineeringQueue(); }
 
   @Get('units/director-summary')
-  @RequirePermissions('unit:view')
+  @RequirePermissions('director:view')
   directorSummary() {
     return this.service.directorSummary();
   }

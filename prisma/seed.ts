@@ -53,6 +53,7 @@ async function main() {
     { code: 'report:view', category: 'Reporting', description: 'View audit trail and reports' },
     // Dashboard
     { code: 'dashboard:configure', category: 'Dashboard', description: 'Configure role-level dashboard defaults' },
+    { code: 'director:view', category: 'Dashboard', description: 'View director-level summary dashboards' },
     // Configuration views (read-only config access for non-admins)
     { code: 'department:view', category: 'Configuration', description: 'View departments' },
     { code: 'process:view', category: 'Configuration', description: 'View process definitions and routes' },
@@ -90,6 +91,30 @@ async function main() {
     create: { name: 'Operator', description: 'Shop floor task execution', isSystem: true },
   });
 
+  // Item 11 of the original punch list asked for separate Sales Director
+  // and Manufacturing Director accounts. Both get read-level visibility
+  // into the Director Dashboard; Sales Director is scoped toward the
+  // customer/order/commercial side, Manufacturing Director toward
+  // production/department load. NOTE: the Director Dashboard itself
+  // currently shows one unified view - these two roles are wired up with
+  // distinct permission sets so access can be properly gated, but whether
+  // the dashboard *content* should actually differ between them (e.g. a
+  // Sales Director probably doesn't need per-department task counts, a
+  // Manufacturing Director probably doesn't need customer/order details)
+  // is a product decision, not something to guess at silently. Flagged
+  // for the user rather than inventing two different dashboard layouts.
+  const salesDirectorRole = await prisma.role.upsert({
+    where: { name: 'Sales Director' },
+    update: {},
+    create: { name: 'Sales Director', description: 'Commercial oversight: customers, orders, delivery timelines', isSystem: true },
+  });
+
+  const manufacturingDirectorRole = await prisma.role.upsert({
+    where: { name: 'Manufacturing Director' },
+    update: {},
+    create: { name: 'Manufacturing Director', description: 'Production oversight: department load, blocked units, capacity', isSystem: true },
+  });
+
   // Admin gets all permissions
   const allPermIds = Object.values(permissions);
   await prisma.rolePermission.deleteMany({ where: { roleId: adminRole.id } });
@@ -125,6 +150,34 @@ async function main() {
   await prisma.rolePermission.createMany({
     data: operatorPerms.map((code) => ({
       roleId: operatorRole.id,
+      permissionId: permissions[code],
+    })),
+  });
+
+  // Sales Director permissions - commercial/customer-facing visibility
+  const salesDirectorPerms = [
+    'director:view', 'customer:view', 'project:view', 'order:view',
+    'unit:view', 'part:view', 'report:view', 'dashboard:configure',
+    'department:view',
+  ];
+  await prisma.rolePermission.deleteMany({ where: { roleId: salesDirectorRole.id } });
+  await prisma.rolePermission.createMany({
+    data: salesDirectorPerms.map((code) => ({
+      roleId: salesDirectorRole.id,
+      permissionId: permissions[code],
+    })),
+  });
+
+  // Manufacturing Director permissions - production/floor oversight
+  const manufacturingDirectorPerms = [
+    'director:view', 'unit:view', 'unit:manage', 'part:view',
+    'task:view', 'task:view-all', 'report:view', 'dashboard:configure',
+    'department:view', 'process:view', 'machine:view',
+  ];
+  await prisma.rolePermission.deleteMany({ where: { roleId: manufacturingDirectorRole.id } });
+  await prisma.rolePermission.createMany({
+    data: manufacturingDirectorPerms.map((code) => ({
+      roleId: manufacturingDirectorRole.id,
       permissionId: permissions[code],
     })),
   });

@@ -4,12 +4,28 @@ import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { Badge, Card, EmptyState, PageHeader, ProgressBar, Spinner } from '@/components/shared';
-import { AlertTriangle, Boxes, CheckCircle2, Clock3, Factory, Truck } from 'lucide-react';
+import { AlertTriangle, Boxes, CheckCircle2, Clock3, Factory, Truck, ShieldOff } from 'lucide-react';
 import { format } from 'date-fns';
 import { cn } from '@/lib/utils';
+import { useAuthStore } from '@/store/auth.store';
 
 export default function DirectorDashboardPage() {
-  const { data, isLoading } = useQuery({ queryKey: ['director-summary'], queryFn: api.units.directorSummary, refetchInterval: 30_000 });
+  const hasPermission = useAuthStore((s) => s.hasPermission);
+  const canView = hasPermission('director:view');
+  const { data, isLoading } = useQuery({ queryKey: ['director-summary'], queryFn: api.units.directorSummary, refetchInterval: 30_000, enabled: canView });
+
+  if (!canView) {
+    return (
+      <div className="h-full flex items-center justify-center">
+        <EmptyState
+          icon={<ShieldOff className="w-10 h-10" />}
+          title="Director access required"
+          description="This dashboard is restricted to Sales Director, Manufacturing Director, and Admin accounts."
+        />
+      </div>
+    );
+  }
+
   if (isLoading) return <div className="h-full flex items-center justify-center"><Spinner className="w-7 h-7" /></div>;
   const totals = data?.totals ?? {};
   const units = data?.units ?? [];
