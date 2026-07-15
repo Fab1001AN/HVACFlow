@@ -53,6 +53,12 @@ export default function ProductionCalendarPage() {
 
   const createMutation = useMutation({
     mutationFn: async () => {
+      // Shipping Date is a starting guess for which month to place the
+      // unit in - not the same thing as production month (production
+      // typically needs to start well before shipping), but it's a
+      // reasonable default that beats always landing in "today" regardless
+      // of when the unit actually ships. Still fully drag-adjustable.
+      const guessedMonth = form.dueDate ? format(new Date(form.dueDate), 'yyyy-MM') : undefined;
       const unit = await api.units.createDirect({
         serialNumber: form.serialNumber,
         unitTypeId: form.unitTypeId,
@@ -60,21 +66,27 @@ export default function ProductionCalendarPage() {
         displayName: form.displayName || undefined,
         dueDate: form.dueDate || undefined,
         oneDriveFolderUrl: form.oneDriveFolderUrl || undefined,
-        // No productionMonth on purpose - the unit lands unscheduled in
-        // the current month column and gets positioned by drag-and-drop
-        // instead of a 36-month dropdown that didn't match the 6-month
-        // visible window.
+        productionMonth: guessedMonth,
       });
       if (form.notes.trim()) {
         await api.units.addComment(unit.id, { message: form.notes.trim() });
       }
       return unit;
     },
-    onSuccess: () => {
+    onSuccess: (unit: any) => {
       queryClient.invalidateQueries({ queryKey: ['units'] });
       setCreateOpen(false);
       setForm(EMPTY_FORM);
-      toast('Unit added — drag it to the right month whenever you\'re ready', 'success');
+
+      if (unit.productionMonth) {
+        const landedMonth = startOfMonth(new Date(unit.productionMonth));
+        const visibleKeys = months.map((m) => format(m, 'yyyy-MM'));
+        const landedKey = format(landedMonth, 'yyyy-MM');
+        if (!visibleKeys.includes(landedKey)) setAnchor(landedMonth);
+        toast(`Unit added to ${format(landedMonth, 'MMMM yyyy')} (based on shipping date) — drag to adjust`, 'success');
+      } else {
+        toast('Unit added — drag it to the right month whenever you\'re ready', 'success');
+      }
     },
     onError: (e: any) => toast(e.message ?? 'Could not create unit', 'error'),
   });
