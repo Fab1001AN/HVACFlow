@@ -45,7 +45,22 @@ export default function ProductionCalendarPage() {
 
   const createMutation = useMutation({
     mutationFn: () => api.units.createDirect({ ...form, priorityLevelId: form.priorityLevelId || undefined, displayName: form.displayName || undefined, dueDate: form.dueDate || undefined, oneDriveFolderUrl: form.oneDriveFolderUrl || undefined }),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['units'] }); setCreateOpen(false); setForm(EMPTY_FORM); toast('Unit added', 'success'); },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['units'] });
+      // The "Production Month" picker offers a much wider range (3 years)
+      // than the calendar's visible window (6 months at a time). Without
+      // this, a unit scheduled outside the current view gets created
+      // successfully but silently disappears off-screen with no
+      // indication of where it went. Jump the view to it instead.
+      const createdMonth = startOfMonth(new Date(`${form.productionMonth}-01`));
+      const visibleKeys = months.map((m) => format(m, 'yyyy-MM'));
+      if (!visibleKeys.includes(form.productionMonth)) {
+        setAnchor(createdMonth);
+      }
+      setCreateOpen(false);
+      setForm(EMPTY_FORM);
+      toast(`Unit added to ${format(createdMonth, 'MMMM yyyy')}`, 'success');
+    },
     onError: (e: any) => toast(e.message ?? 'Could not create unit', 'error'),
   });
 
