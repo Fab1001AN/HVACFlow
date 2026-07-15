@@ -13,6 +13,19 @@ import { cn } from '@/lib/utils';
 const EMPTY_FORM = { serialNumber: '', displayName: '', unitTypeId: '', priorityLevelId: '', dueDate: '', oneDriveFolderUrl: '', notes: '' };
 const DRAG_TYPE = 'application/x-hvacflow-unit';
 
+// productionMonth always comes back from the API as UTC midnight on the
+// 1st of a month (e.g. "2026-11-01T00:00:00.000Z"). Parsing that with
+// `new Date(iso)` and then formatting with a LOCAL-timezone-aware
+// formatter (date-fns `format`) silently shifts it to the previous day
+// in any timezone behind UTC - which crosses the month boundary and
+// displays/buckets the unit under the WRONG month entirely. Build the
+// Date directly from the numeric year/month instead, bypassing UTC
+// parsing altogether, since we only ever care about the month itself.
+function parseMonthSafe(isoString: string): Date {
+  const [year, month] = isoString.slice(0, 7).split('-').map(Number);
+  return new Date(year, month - 1, 1);
+}
+
 export default function ProductionCalendarPage() {
   const queryClient = useQueryClient();
   const { hasPermission } = useAuthStore();
@@ -25,6 +38,8 @@ export default function ProductionCalendarPage() {
   const [overUnitId, setOverUnitId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [searchOpen, setSearchOpen] = useState(false);
+  const scrollContainerRef = useRef<HTMLDivElement | null>(null);
+  const lastEdgeAdvanceRef = useRef(0);
 
   const { data: searchResults = [], isFetching: searching } = useQuery({
     queryKey: ['units', 'search', searchQuery],
@@ -44,7 +59,7 @@ export default function ProductionCalendarPage() {
     const map = new Map<string, any[]>();
     months.forEach((m) => map.set(format(m, 'yyyy-MM'), []));
     units.forEach((u: any) => {
-      const key = u.productionMonth ? format(new Date(u.productionMonth), 'yyyy-MM') : from;
+      const key = u.productionMonth ? format(parseMonthSafe(u.productionMonth), 'yyyy-MM') : from;
       if (map.has(key)) map.get(key)!.push(u);
     });
     map.forEach((items) => items.sort((a, b) => a.priorityPosition - b.priorityPosition || a.serialNumber.localeCompare(b.serialNumber)));
@@ -58,7 +73,7 @@ export default function ProductionCalendarPage() {
       // typically needs to start well before shipping), but it's a
       // reasonable default that beats always landing in "today" regardless
       // of when the unit actually ships. Still fully drag-adjustable.
-      const guessedMonth = form.dueDate ? format(new Date(form.dueDate), 'yyyy-MM') : undefined;
+      const guessedMonth = form.dueDate ? form.dueDate.slice(0, 7) : undefined;
       const unit = await api.units.createDirect({
         serialNumber: form.serialNumber,
         unitTypeId: form.unitTypeId,
@@ -79,7 +94,7 @@ export default function ProductionCalendarPage() {
       setForm(EMPTY_FORM);
 
       if (unit.productionMonth) {
-        const landedMonth = startOfMonth(new Date(unit.productionMonth));
+        const landedMonth = parseMonthSafe(unit.productionMonth);
         const visibleKeys = months.map((m) => format(m, 'yyyy-MM'));
         const landedKey = format(landedMonth, 'yyyy-MM');
         if (!visibleKeys.includes(landedKey)) setAnchor(landedMonth);
@@ -152,7 +167,7 @@ export default function ProductionCalendarPage() {
     // Skip the call entirely if nothing would actually change (dropped
     // back in its original spot).
     const draggedUnit = units.find((u: any) => u.id === draggedUnitId);
-    const originalMonthKey = draggedUnit?.productionMonth ? format(new Date(draggedUnit.productionMonth), 'yyyy-MM') : from;
+    const originalMonthKey = draggedUnit?.productionMonth ? format(parseMonthSafe(draggedUnit.productionMonth), 'yyyy-MM') : from;
     const originalOrderedIds = (grouped.get(monthKey) ?? []).map((u: any) => u.id);
     const unchanged = originalMonthKey === monthKey && JSON.stringify(originalOrderedIds) === JSON.stringify(orderedIds);
     if (!unchanged) {
@@ -161,8 +176,33 @@ export default function ProductionCalendarPage() {
     clearDrag();
   }
 
+  // While dragging a card near the left/right edge of the visible
+  // calendar, automatically slide the window one month further so
+  // months further out (e.g. December when starting from a June view)
+  // become reachable without cancelling the drag to click the arrow
+  // buttons.
+  const EDGE_ZONE_PX = 90;
+  const EDGE_ADVANCE_COOLDOWN_MS = 650;
+  function handleEdgeAutoAdvance(event: React.DragEvent) {
+    const container = scrollContainerRef.current;
+    if (!container) return;
+    const rect = container.getBoundingClientRect();
+    const distanceFromLeft = event.clientX - rect.left;
+    const distanceFromRight = rect.right - event.clientX;
+    const now = Date.now();
+    if (now - lastEdgeAdvanceRef.current < EDGE_ADVANCE_COOLDOWN_MS) return;
+
+    if (distanceFromRight >= 0 && distanceFromRight < EDGE_ZONE_PX) {
+      lastEdgeAdvanceRef.current = now;
+      setAnchor((a) => addMonths(a, 1));
+    } else if (distanceFromLeft >= 0 && distanceFromLeft < EDGE_ZONE_PX) {
+      lastEdgeAdvanceRef.current = now;
+      setAnchor((a) => addMonths(a, -1));
+    }
+  }
+
   function jumpToUnit(unit: any) {
-    const targetMonth = unit.productionMonth ? startOfMonth(new Date(unit.productionMonth)) : startOfMonth(new Date());
+    const targetMonth = unit.productionMonth ? parseMonthSafe(unit.productionMonth) : startOfMonth(new Date());
     setAnchor(targetMonth);
     setSearchOpen(false);
     setSearchQuery('');
@@ -204,7 +244,7 @@ export default function ProductionCalendarPage() {
                 >
                   <span className="font-medium">{u.serialNumber}</span>
                   <span className="text-xs text-muted-foreground">
-                    {u.productionMonth ? format(new Date(u.productionMonth), 'MMM yyyy') : 'Unscheduled'}
+                    {u.productionMonth ? format(parseMonthSafe(u.productionMonth), 'MMM yyyy') : 'Unscheduled'}
                   </span>
                 </button>
               ))
@@ -213,7 +253,7 @@ export default function ProductionCalendarPage() {
         )}
       </div>
     </div>
-    <div className="flex-1 overflow-auto p-4">{isLoading ? <div className="h-52 flex items-center justify-center"><Spinner /></div> : <div className="grid grid-cols-1 xl:grid-cols-3 2xl:grid-cols-6 gap-4 min-w-[1050px]">
+    <div ref={scrollContainerRef} onDragOver={handleEdgeAutoAdvance} className="flex-1 overflow-auto p-4">{isLoading ? <div className="h-52 flex items-center justify-center"><Spinner /></div> : <div className="grid grid-cols-1 xl:grid-cols-3 2xl:grid-cols-6 gap-4 min-w-[1050px]">
       {months.map((month) => {
         const key = format(month, 'yyyy-MM');
         const list = grouped.get(key) ?? [];
@@ -247,7 +287,6 @@ export default function ProductionCalendarPage() {
                   onDragEnd={clearDrag}
                   onDragOver={(e) => {
                     e.preventDefault();
-                    e.stopPropagation();
                     e.dataTransfer.dropEffect = 'move';
                     setOverMonth(key);
                     setOverUnitId(unit.id);
@@ -272,7 +311,7 @@ export default function ProductionCalendarPage() {
                 </div>
               ))}
               <div
-                onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); setOverMonth(key); setOverUnitId(null); }}
+                onDragOver={(e) => { e.preventDefault(); setOverMonth(key); setOverUnitId(null); }}
                 onDrop={(e) => handleDrop(e, key, null)}
                 className={cn('h-24 border-2 border-dashed rounded-lg flex items-center justify-center text-xs text-muted-foreground transition-colors', overMonth === key && 'border-primary text-primary bg-primary/5')}
               >

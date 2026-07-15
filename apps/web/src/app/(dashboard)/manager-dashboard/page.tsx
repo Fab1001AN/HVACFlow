@@ -6,6 +6,15 @@ import { Badge, Button, Card, EmptyState, PageHeader, ProgressBar, Spinner, toas
 import { AlertTriangle } from 'lucide-react';
 import { format } from 'date-fns';
 
+// See the identical helper + comment in production-calendar/page.tsx -
+// productionMonth is always UTC midnight on the 1st; parsing it with a
+// plain `new Date()` and formatting in local time can roll it back into
+// the previous month for any timezone behind UTC.
+function parseMonthSafe(isoString: string): Date {
+  const [year, month] = isoString.slice(0, 7).split('-').map(Number);
+  return new Date(year, month - 1, 1);
+}
+
 function DepartmentProgress({ departments = [] }: { departments?: any[] }) {
   if (!departments.length) return <div className="mt-3 text-xs text-muted-foreground">No routed parts yet.</div>;
   return <div className="mt-3 space-y-2">{departments.map((department) => <div key={department.id} className="rounded-md border bg-secondary/20 p-2">
@@ -42,7 +51,7 @@ export default function ManagerDashboard() {
           <Link href={`/units/${u.id}`} className="font-semibold hover:text-primary">{u.serialNumber}</Link>
           <div className="text-xs text-muted-foreground">{u.unitType?.name}</div>
         </div>
-        <span className="text-xs">{u.productionMonth ? format(new Date(u.productionMonth), 'MMMM yyyy') : 'Unscheduled'}</span>
+        <span className="text-xs">{u.productionMonth ? format(parseMonthSafe(u.productionMonth), 'MMMM yyyy') : 'Unscheduled'}</span>
       </div>
       {u.isBlocked && <div className="mt-2 flex items-start gap-1.5 rounded-md bg-destructive/10 border border-destructive/30 px-2 py-1.5 text-[11px] text-destructive"><AlertTriangle className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" /><span>Blocked{u.holdReason ? `: ${u.holdReason}` : ''}</span></div>}
       <div className="mt-2 text-xs">Engineering: {u.engineeringStatus.replaceAll(/([A-Z])/g, ' $1').trim()}</div>
