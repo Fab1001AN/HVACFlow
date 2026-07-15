@@ -47,9 +47,18 @@ REM ── 3. Start PostgreSQL ────────────────�
 echo Starting PostgreSQL...
 docker-compose up -d postgres
 if errorlevel 1 (
-    echo [ERROR] Could not start PostgreSQL. See the error above.
-    pause
-    exit /b 1
+    REM docker-compose fails with a name conflict if a container called
+    REM hvacflow_postgres is already running (e.g. left over from a prior
+    REM session or started outside this exact compose project). If it's
+    REM already up and healthy, that's fine - just carry on.
+    for /f "tokens=*" %%h in ('docker inspect -f "{{.State.Running}}" hvacflow_postgres 2^>nul') do set PG_RUNNING=%%h
+    if "!PG_RUNNING!"=="true" (
+        echo A hvacflow_postgres container is already running - using it.
+    ) else (
+        echo [ERROR] Could not start PostgreSQL. See the error above.
+        pause
+        exit /b 1
+    )
 )
 echo Waiting for PostgreSQL to be ready...
 timeout /t 6 /nobreak >nul
