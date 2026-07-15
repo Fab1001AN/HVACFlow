@@ -2,19 +2,23 @@
 
 import { cn, getElapsed, STATUS_BG } from '@/lib/utils';
 import { TaskStatus } from '@hvacflow/shared-types';
-import { Avatar } from '@/components/shared';
+import { Avatar, Button } from '@/components/shared';
 import { PriorityDot } from '@/components/shared/priority-dot';
-import { Clock } from 'lucide-react';
+import { Clock, Check } from 'lucide-react';
 
 interface TaskCardProps {
   task: any;
   onClick: () => void;
+  onComplete?: (taskId: string) => void;
+  completing?: boolean;
 }
 
-export function TaskCard({ task, onClick }: TaskCardProps) {
+export function TaskCard({ task, onClick, onComplete, completing }: TaskCardProps) {
   const isInProgress = task.status === TaskStatus.InProgress;
   const isPendingVerification = task.status === TaskStatus.PendingVerification;
   const isOnHold = task.status === TaskStatus.OnHold;
+  const isReady = task.status === TaskStatus.Ready;
+  const canComplete = (isReady || isInProgress) && !!onComplete;
   const unitSerial = task.part?.unit?.serialNumber ?? task.unit?.serialNumber ?? '—';
   const partLabel = task.part ? `${task.part.partType?.name} · ${task.part.identifier}` : null;
 
@@ -76,6 +80,24 @@ export function TaskCard({ task, onClick }: TaskCardProps) {
       {/* On hold label */}
       {isOnHold && (
         <div className="mt-2 text-xs text-orange-400 font-medium">On Hold</div>
+      )}
+
+      {/* Task Completed - no separate start/end step, no side panel
+          needed for the common case. Clicking anywhere else on the card
+          still opens the detail drawer, for notes/checklist/history. */}
+      {canComplete && (
+        <Button
+          size="sm"
+          className="w-full mt-3"
+          loading={completing}
+          onClick={(e) => {
+            e.stopPropagation();
+            onComplete!(task.id);
+          }}
+        >
+          <Check className="w-3.5 h-3.5" />
+          Task Completed
+        </Button>
       )}
     </div>
   );
