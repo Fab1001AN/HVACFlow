@@ -7,11 +7,10 @@ import { addMonths, format, startOfMonth } from 'date-fns';
 import { GripVertical, Plus, ChevronLeft, ChevronRight } from 'lucide-react';
 import { api } from '@/lib/api';
 import { useAuthStore } from '@/store/auth.store';
-import { Badge, Button, Card, Input, Modal, PageHeader, Select, Spinner, toast } from '@/components/shared';
+import { Badge, Button, Card, Input, Modal, PageHeader, Select, Spinner, Textarea, toast } from '@/components/shared';
 import { cn } from '@/lib/utils';
 
-const currentMonth = format(new Date(), 'yyyy-MM');
-const EMPTY_FORM = { serialNumber: '', displayName: '', unitTypeId: '', priorityLevelId: '', productionMonth: currentMonth, dueDate: '', oneDriveFolderUrl: '' };
+const EMPTY_FORM = { serialNumber: '', displayName: '', unitTypeId: '', priorityLevelId: '', dueDate: '', oneDriveFolderUrl: '', notes: '' };
 const DRAG_TYPE = 'application/x-hvacflow-unit';
 
 export default function ProductionCalendarPage() {
@@ -45,22 +44,29 @@ export default function ProductionCalendarPage() {
   }, [months, units, from]);
 
   const createMutation = useMutation({
-    mutationFn: () => api.units.createDirect({ ...form, priorityLevelId: form.priorityLevelId || undefined, displayName: form.displayName || undefined, dueDate: form.dueDate || undefined, oneDriveFolderUrl: form.oneDriveFolderUrl || undefined }),
+    mutationFn: async () => {
+      const unit = await api.units.createDirect({
+        serialNumber: form.serialNumber,
+        unitTypeId: form.unitTypeId,
+        priorityLevelId: form.priorityLevelId || undefined,
+        displayName: form.displayName || undefined,
+        dueDate: form.dueDate || undefined,
+        oneDriveFolderUrl: form.oneDriveFolderUrl || undefined,
+        // No productionMonth on purpose - the unit lands unscheduled in
+        // the current month column and gets positioned by drag-and-drop
+        // instead of a 36-month dropdown that didn't match the 6-month
+        // visible window.
+      });
+      if (form.notes.trim()) {
+        await api.units.addComment(unit.id, { message: form.notes.trim() });
+      }
+      return unit;
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['units'] });
-      // The "Production Month" picker offers a much wider range (3 years)
-      // than the calendar's visible window (6 months at a time). Without
-      // this, a unit scheduled outside the current view gets created
-      // successfully but silently disappears off-screen with no
-      // indication of where it went. Jump the view to it instead.
-      const createdMonth = startOfMonth(new Date(`${form.productionMonth}-01`));
-      const visibleKeys = months.map((m) => format(m, 'yyyy-MM'));
-      if (!visibleKeys.includes(form.productionMonth)) {
-        setAnchor(createdMonth);
-      }
       setCreateOpen(false);
       setForm(EMPTY_FORM);
-      toast(`Unit added to ${format(createdMonth, 'MMMM yyyy')}`, 'success');
+      toast('Unit added — drag it to the right month whenever you\'re ready', 'success');
     },
     onError: (e: any) => toast(e.message ?? 'Could not create unit', 'error'),
   });
@@ -135,8 +141,6 @@ export default function ProductionCalendarPage() {
     clearDrag();
   }
 
-  const monthOptions = Array.from({ length: 36 }, (_, i) => addMonths(startOfMonth(new Date()), i - 6)).map((m) => ({ value: format(m, 'yyyy-MM'), label: format(m, 'MMMM yyyy') }));
-
   return <div className="flex flex-col h-full">
     <PageHeader title="Production Calendar" description="Plan by month and year. Drag using the grip and drop anywhere inside another month." action={hasPermission('unit:manage') ? <Button leftIcon={<Plus className="w-4 h-4" />} onClick={() => setCreateOpen(true)}>Add Unit</Button> : undefined} />
     <div className="flex items-center gap-2 px-6 py-3 border-b"><Button variant="outline" size="sm" onClick={() => setAnchor(addMonths(anchor, -6))}><ChevronLeft className="w-4 h-4" /></Button><Button variant="outline" size="sm" onClick={() => setAnchor(startOfMonth(new Date()))}>Current month</Button><Button variant="outline" size="sm" onClick={() => setAnchor(addMonths(anchor, 6))}><ChevronRight className="w-4 h-4" /></Button></div>
@@ -210,8 +214,18 @@ export default function ProductionCalendarPage() {
         );
       })}
     </div>}</div>
-    <Modal open={createOpen} onClose={() => setCreateOpen(false)} title="Add Unit" description="Create a unit directly and assign its production month." footer={<div className="flex justify-end gap-2"><Button variant="secondary" onClick={() => setCreateOpen(false)}>Cancel</Button><Button loading={createMutation.isPending} disabled={!form.serialNumber || !form.unitTypeId || !form.productionMonth} onClick={() => createMutation.mutate()}>Create Unit</Button></div>}>
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4"><Input label="Unit Number" value={form.serialNumber} onChange={(e) => setForm({ ...form, serialNumber: e.target.value })} /><Input label="Display Name" value={form.displayName} onChange={(e) => setForm({ ...form, displayName: e.target.value })} /><Select label="Unit Type" value={form.unitTypeId} onChange={(e) => setForm({ ...form, unitTypeId: e.target.value })} options={unitTypes.map((x: any) => ({ value: x.id, label: `${x.code} — ${x.name}` }))} placeholder="Select" /><Select label="Priority" value={form.priorityLevelId} onChange={(e) => setForm({ ...form, priorityLevelId: e.target.value })} options={priorities.map((x: any) => ({ value: x.id, label: x.name }))} placeholder="Default" /><Select label="Production Month" value={form.productionMonth} onChange={(e) => setForm({ ...form, productionMonth: e.target.value })} options={monthOptions} /><Input label="Shipping Date" type="date" value={form.dueDate} onChange={(e) => setForm({ ...form, dueDate: e.target.value })} /><div className="md:col-span-2"><Input label="OneDrive Folder URL" value={form.oneDriveFolderUrl} onChange={(e) => setForm({ ...form, oneDriveFolderUrl: e.target.value })} /></div></div>
+    <Modal open={createOpen} onClose={() => setCreateOpen(false)} title="Add Unit" description="Create a unit, then drag it onto the month you want on the calendar." footer={<div className="flex justify-end gap-2"><Button variant="secondary" onClick={() => setCreateOpen(false)}>Cancel</Button><Button loading={createMutation.isPending} disabled={!form.serialNumber || !form.unitTypeId} onClick={() => createMutation.mutate()}>Create Unit</Button></div>}>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <Input label="Unit Number" value={form.serialNumber} onChange={(e) => setForm({ ...form, serialNumber: e.target.value })} />
+        <Input label="Display Name" value={form.displayName} onChange={(e) => setForm({ ...form, displayName: e.target.value })} />
+        <Select label="Unit Type" value={form.unitTypeId} onChange={(e) => setForm({ ...form, unitTypeId: e.target.value })} options={unitTypes.map((x: any) => ({ value: x.id, label: `${x.code} — ${x.name}` }))} placeholder="Select" />
+        <Select label="Priority" value={form.priorityLevelId} onChange={(e) => setForm({ ...form, priorityLevelId: e.target.value })} options={priorities.map((x: any) => ({ value: x.id, label: x.name }))} placeholder="Default" />
+        <Input label="Shipping Date" type="date" value={form.dueDate} onChange={(e) => setForm({ ...form, dueDate: e.target.value })} />
+        <Input label="OneDrive Folder URL" value={form.oneDriveFolderUrl} onChange={(e) => setForm({ ...form, oneDriveFolderUrl: e.target.value })} />
+        <div className="md:col-span-2">
+          <Textarea label="Notes" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} placeholder="Anything worth flagging - spec changes, customer requests, etc." />
+        </div>
+      </div>
     </Modal>
   </div>;
 }
