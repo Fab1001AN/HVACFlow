@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 
 const NAV_ITEMS = [
+  { href: '/mission-control', label: 'Mission Control', icon: LayoutDashboard },
   { href: '/production-calendar', label: 'Production Calendar', icon: CalendarDays },
   { href: '/director-dashboard', label: 'Director Dashboard', icon: BarChart3, permission: 'director:view' },
   { href: '/manager-dashboard', label: 'Manager Dashboard', icon: ClipboardList },

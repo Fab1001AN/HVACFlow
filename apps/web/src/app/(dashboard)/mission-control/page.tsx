@@ -226,6 +226,16 @@ function KanbanBoard({
 function KanbanColumn({ column, onTaskClick }: { column: any; onTaskClick: (id: string) => void }) {
   const { department, tasks, taskCount } = column;
 
+  // Group cards by process/station within the department (e.g. "Bending",
+  // "Cutting", "Foaming" inside a Fabrication column) so it's clear at a
+  // glance what's queued at each station, not just a flat mixed list.
+  const stations = new Map<string, any[]>();
+  for (const task of tasks) {
+    const stationName = task.processDefinition?.name ?? 'Unassigned';
+    if (!stations.has(stationName)) stations.set(stationName, []);
+    stations.get(stationName)!.push(task);
+  }
+
   return (
     <div className="flex flex-col w-72 flex-shrink-0">
       {/* Column header */}
@@ -242,15 +252,25 @@ function KanbanColumn({ column, onTaskClick }: { column: any; onTaskClick: (id: 
         </span>
       </div>
 
-      {/* Cards */}
-      <div className="flex-1 overflow-y-auto space-y-2 pb-4">
+      {/* Cards, grouped by station */}
+      <div className="flex-1 overflow-y-auto space-y-4 pb-4">
         {tasks.length === 0 ? (
           <div className="flex items-center justify-center h-20 border border-dashed border-border rounded-lg">
             <span className="text-xs text-muted-foreground">No active tasks</span>
           </div>
         ) : (
-          tasks.map((task: any) => (
-            <TaskCard key={task.id} task={task} onClick={() => onTaskClick(task.id)} />
+          [...stations.entries()].map(([stationName, stationTasks]) => (
+            <div key={stationName}>
+              <div className="flex items-center justify-between px-1 mb-1.5">
+                <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">{stationName}</span>
+                <span className="text-[10px] text-muted-foreground tabular-nums">{stationTasks.length}</span>
+              </div>
+              <div className="space-y-2">
+                {stationTasks.map((task: any) => (
+                  <TaskCard key={task.id} task={task} onClick={() => onTaskClick(task.id)} />
+                ))}
+              </div>
+            </div>
           ))
         )}
       </div>
