@@ -1,11 +1,11 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useParams } from 'next/navigation';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
-import { PageHeader, Spinner, Card, ProgressBar, Button } from '@/components/shared';
-import { CheckCircle, Circle, Clock, AlertCircle, ChevronRight } from 'lucide-react';
+import { PageHeader, Spinner, Card, ProgressBar, Button, Modal, Select, Textarea } from '@/components/shared';
+import { CheckCircle, Circle, Clock, AlertCircle, ChevronRight, Route, GripVertical, X } from 'lucide-react';
 import { TaskDrawer } from '@/features/tasks/task-drawer';
 import { StatusBadge } from '@/components/shared/status-badge';
 import { PriorityDot } from '@/components/shared/priority-dot';
@@ -13,11 +13,18 @@ import { PART_STATUS_BG, formatDateTime, formatDuration } from '@/lib/utils';
 import { TaskStatus, PartStatus } from '@hvacflow/shared-types';
 import { cn } from '@/lib/utils';
 import { useWsEvent, useSubscribeUnit } from '@/lib/websocket';
+import { toast } from '@/components/shared';
+
+// Statuses that represent work already done or in flight — these tasks are
+// locked and stay exactly as they are. Editing a route only ever replaces
+// the still-pending steps that come after them.
+const LOCKED_STATUSES = [TaskStatus.Completed, TaskStatus.PendingVerification, TaskStatus.InProgress];
 
 export default function PartDetailPage() {
   const { id } = useParams<{ id: string }>();
   const queryClient = useQueryClient();
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  const [routeModalOpen, setRouteModalOpen] = useState(false);
 
   const { data: part, isLoading } = useQuery({
     queryKey: ['part', id],
@@ -52,6 +59,11 @@ export default function PartDetailPage() {
           { label: part.unit?.serialNumber ?? '…', href: `/units/${part.unitId}` },
           { label: part.identifier },
         ]}
+        action={
+          <Button variant="secondary" leftIcon={<Route className="w-3.5 h-3.5" />} onClick={() => setRouteModalOpen(true)}>
+            Edit Route
+          </Button>
+        }
       />
 
       <div className="flex-1 overflow-y-auto p-6 space-y-6">
@@ -128,7 +140,166 @@ export default function PartDetailPage() {
       </div>
 
       <TaskDrawer taskId={selectedTaskId} onClose={() => setSelectedTaskId(null)} />
+
+      <EditRouteModal
+        open={routeModalOpen}
+        onClose={() => setRouteModalOpen(false)}
+        part={part}
+        onSaved={() => queryClient.invalidateQueries({ queryKey: ['part', id] })}
+      />
     </div>
+  );
+}
+
+function EditRouteModal({
+  open,
+  onClose,
+  part,
+  onSaved,
+}: {
+  open: boolean;
+  onClose: () => void;
+  part: any;
+  onSaved: () => void;
+}) {
+  const tasks = part.tasks ?? [];
+  const lockedTasks = tasks.filter((t: any) => LOCKED_STATUSES.includes(t.status));
+  const pendingTasks = tasks.filter((t: any) => !LOCKED_STATUSES.includes(t.status));
+
+  // Editable list of process definition ids that will replace every
+  // currently-pending (not yet started) task. Seeded from the part's
+  // current pending steps so editing is additive by default.
+  const [steps, setSteps] = useState<{ id: string; name: string }[]>([]);
+  const [addingId, setAddingId] = useState('');
+  const [reason, setReason] = useState('');
+
+  const { data: processDefinitions = [] } = useQuery({
+    queryKey: ['process-definitions', 'active', 'part'],
+    queryFn: () => api.processDefinitions.list({ isActive: true }),
+    enabled: open,
+  });
+
+  // Seed the editable list once per time the modal opens; reset on close.
+  useEffect(() => {
+    if (open) {
+      setSteps(pendingTasks.map((t: any) => ({ id: t.processDefinitionId, name: t.processDefinition?.name ?? 'Unknown process' })));
+    } else {
+      setReason('');
+      setAddingId('');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, part.id]);
+
+  const saveMutation = useMutation({
+    mutationFn: () => api.parts.replaceRoute(part.id, steps.map((s) => s.id), reason),
+    onSuccess: () => {
+      toast('Route updated — pending steps replaced', 'success');
+      onSaved();
+      onClose();
+    },
+    onError: (err: any) => toast(err.message, 'error'),
+  });
+
+  const moveStep = (index: number, direction: -1 | 1) => {
+    setSteps((current) => {
+      const next = [...current];
+      const target = index + direction;
+      if (target < 0 || target >= next.length) return current;
+      [next[index], next[target]] = [next[target], next[index]];
+      return next;
+    });
+  };
+
+  const addStep = () => {
+    const def = (processDefinitions as any[]).find((p) => p.id === addingId);
+    if (!def) return;
+    setSteps((current) => [...current, { id: def.id, name: def.name }]);
+    setAddingId('');
+  };
+
+  return (
+    <Modal
+      open={open}
+      onClose={onClose}
+      size="lg"
+      title="Edit Route"
+      description="Steps already completed or in progress are locked and stay as-is. Everything below is the remaining route — reorder, add, or remove steps, then save."
+      footer={
+        <div className="flex justify-end gap-2">
+          <Button variant="secondary" onClick={onClose}>Cancel</Button>
+          <Button
+            loading={saveMutation.isPending}
+            disabled={steps.length === 0 || !reason.trim()}
+            onClick={() => saveMutation.mutate()}
+          >
+            Save Route
+          </Button>
+        </div>
+      }
+    >
+      <div className="space-y-4">
+        {lockedTasks.length > 0 && (
+          <div>
+            <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-2">Locked (already done or in progress)</p>
+            <div className="space-y-1">
+              {lockedTasks
+                .sort((a: any, b: any) => a.sequenceOrder - b.sequenceOrder)
+                .map((t: any) => (
+                  <div key={t.id} className="flex items-center gap-2 px-3 py-2 rounded-md bg-secondary text-sm text-muted-foreground">
+                    <CheckCircle className="w-3.5 h-3.5 flex-shrink-0" />
+                    {t.processDefinition?.name}
+                    <span className="ml-auto text-xs">{t.status}</span>
+                  </div>
+                ))}
+            </div>
+          </div>
+        )}
+
+        <div>
+          <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-2">Remaining steps (editable)</p>
+          {steps.length === 0 ? (
+            <p className="text-sm text-muted-foreground px-1">No remaining steps — add at least one below.</p>
+          ) : (
+            <div className="space-y-1">
+              {steps.map((step, index) => (
+                <div key={`${step.id}-${index}`} className="flex items-center gap-2 px-3 py-2 rounded-md border border-border text-sm">
+                  <GripVertical className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" />
+                  <span className="flex-1 text-foreground">{step.name}</span>
+                  <button type="button" onClick={() => moveStep(index, -1)} disabled={index === 0}
+                    className="text-muted-foreground hover:text-foreground disabled:opacity-30 disabled:pointer-events-none px-1">↑</button>
+                  <button type="button" onClick={() => moveStep(index, 1)} disabled={index === steps.length - 1}
+                    className="text-muted-foreground hover:text-foreground disabled:opacity-30 disabled:pointer-events-none px-1">↓</button>
+                  <button type="button" onClick={() => setSteps((s) => s.filter((_, i) => i !== index))}
+                    className="text-destructive hover:text-destructive/80 px-1"><X className="w-3.5 h-3.5" /></button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div className="flex items-end gap-2">
+          <div className="flex-1">
+            <Select
+              label="Add a step"
+              value={addingId}
+              onChange={(e) => setAddingId(e.target.value)}
+              options={(processDefinitions as any[])
+                .filter((p) => p.appliesTo === 'PART')
+                .map((p) => ({ value: p.id, label: `${p.name} (${p.department?.name})` }))}
+              placeholder="Select a process"
+            />
+          </div>
+          <Button variant="secondary" onClick={addStep} disabled={!addingId}>Add</Button>
+        </div>
+
+        <Textarea
+          label="Reason for change"
+          value={reason}
+          onChange={(e) => setReason(e.target.value)}
+          placeholder="e.g. Customer changed spec, skipping painting for this unit"
+        />
+      </div>
+    </Modal>
   );
 }
 
