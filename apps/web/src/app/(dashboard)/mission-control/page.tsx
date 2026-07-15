@@ -77,7 +77,10 @@ export default function MissionControlPage() {
   // their tasks sit in Pending status and are invisible to the board
   // below until someone explicitly starts manufacturing. Without this,
   // released units would be permanently stuck with no visible next step.
-  const canStartUnits = hasPermission('unit:manage');
+  // Gated on task:start, matching exactly what POST /units/:id/start-
+  // manufacturing actually requires server-side - not unit:manage,
+  // which most shop-floor operators who'd be starting units don't hold.
+  const canStartUnits = hasPermission('task:start');
   const { data: managerSummary } = useQuery({
     queryKey: ['manager-summary'],
     queryFn: api.units.managerSummary,
