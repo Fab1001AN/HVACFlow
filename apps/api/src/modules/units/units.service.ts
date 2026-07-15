@@ -87,6 +87,26 @@ export class UnitsService {
     });
   }
 
+  // Quick-jump search across every unit, not just the calendar's current
+  // visible window - lets the UI find a unit by serial number/display
+  // name and jump the calendar view straight to whatever month it's
+  // actually scheduled in.
+  async search(query: string) {
+    if (!query.trim()) return [];
+    return this.prisma.unit.findMany({
+      where: {
+        deletedAt: null,
+        OR: [
+          { serialNumber: { contains: query, mode: 'insensitive' } },
+          { displayName: { contains: query, mode: 'insensitive' } },
+        ],
+      },
+      select: { id: true, serialNumber: true, displayName: true, productionMonth: true, unitType: { select: { name: true } } },
+      orderBy: { serialNumber: 'asc' },
+      take: 15,
+    });
+  }
+
   async directorSummary() {
     const units = await this.prisma.unit.findMany({ where: { deletedAt: null, status: { notIn: ['Completed', 'Dispatched'] } }, include: this.unitSummaryInclude(), orderBy: [{ isBlocked: 'desc' }, { dueDate: 'asc' }, { priorityPosition: 'asc' }] });
     const now = new Date();

@@ -306,6 +306,7 @@ export const api = {
   units: {
     list: (params?: any) => api.get<any>('/units', { params }),
     calendar: (params?: { from?: string; to?: string }) => api.get<any[]>('/units/calendar', { params }),
+    search: (q: string) => api.get<any[]>('/units/search', { params: { q } }),
     directorSummary: () => api.get<any>('/units/director-summary'),
     managerSummary: () => api.get<any>('/units/manager-summary'),
     engineeringQueue: () => api.get<any[]>('/units/engineering-queue'),

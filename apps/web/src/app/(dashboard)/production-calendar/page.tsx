@@ -4,7 +4,7 @@ import { useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { addMonths, format, startOfMonth } from 'date-fns';
-import { GripVertical, Plus, ChevronLeft, ChevronRight } from 'lucide-react';
+import { GripVertical, Plus, ChevronLeft, ChevronRight, Search, X } from 'lucide-react';
 import { api } from '@/lib/api';
 import { useAuthStore } from '@/store/auth.store';
 import { Badge, Button, Card, Input, Modal, PageHeader, Select, Spinner, Textarea, toast } from '@/components/shared';
@@ -23,6 +23,14 @@ export default function ProductionCalendarPage() {
   const draggedIdRef = useRef<string | null>(null);
   const [overMonth, setOverMonth] = useState<string | null>(null);
   const [overUnitId, setOverUnitId] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchOpen, setSearchOpen] = useState(false);
+
+  const { data: searchResults = [], isFetching: searching } = useQuery({
+    queryKey: ['units', 'search', searchQuery],
+    queryFn: () => api.units.search(searchQuery),
+    enabled: searchQuery.trim().length >= 2,
+  });
 
   const months = useMemo(() => Array.from({ length: 6 }, (_, i) => addMonths(anchor, i)), [anchor]);
   const from = format(months[0], 'yyyy-MM');
@@ -141,9 +149,58 @@ export default function ProductionCalendarPage() {
     clearDrag();
   }
 
+  function jumpToUnit(unit: any) {
+    const targetMonth = unit.productionMonth ? startOfMonth(new Date(unit.productionMonth)) : startOfMonth(new Date());
+    setAnchor(targetMonth);
+    setSearchOpen(false);
+    setSearchQuery('');
+  }
+
+
   return <div className="flex flex-col h-full">
     <PageHeader title="Production Calendar" description="Plan by month and year. Drag using the grip and drop anywhere inside another month." action={hasPermission('unit:manage') ? <Button leftIcon={<Plus className="w-4 h-4" />} onClick={() => setCreateOpen(true)}>Add Unit</Button> : undefined} />
-    <div className="flex items-center gap-2 px-6 py-3 border-b"><Button variant="outline" size="sm" onClick={() => setAnchor(addMonths(anchor, -6))}><ChevronLeft className="w-4 h-4" /></Button><Button variant="outline" size="sm" onClick={() => setAnchor(startOfMonth(new Date()))}>Current month</Button><Button variant="outline" size="sm" onClick={() => setAnchor(addMonths(anchor, 6))}><ChevronRight className="w-4 h-4" /></Button></div>
+    <div className="flex items-center gap-2 px-6 py-3 border-b">
+      <Button variant="outline" size="sm" onClick={() => setAnchor(addMonths(anchor, -6))}><ChevronLeft className="w-4 h-4" /></Button>
+      <Button variant="outline" size="sm" onClick={() => setAnchor(startOfMonth(new Date()))}>Current month</Button>
+      <Button variant="outline" size="sm" onClick={() => setAnchor(addMonths(anchor, 6))}><ChevronRight className="w-4 h-4" /></Button>
+      <div className="relative ml-2 flex-1 max-w-xs">
+        <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground pointer-events-none" />
+        <input
+          value={searchQuery}
+          onChange={(e) => { setSearchQuery(e.target.value); setSearchOpen(true); }}
+          onFocus={() => setSearchOpen(true)}
+          placeholder="Search units by number or name…"
+          className="w-full h-8 pl-8 pr-7 rounded-md border border-border bg-secondary text-sm focus:outline-none focus:ring-1 focus:ring-primary/50"
+        />
+        {searchQuery && (
+          <button onClick={() => { setSearchQuery(''); setSearchOpen(false); }} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
+            <X className="w-3.5 h-3.5" />
+          </button>
+        )}
+        {searchOpen && searchQuery.trim().length >= 2 && (
+          <div className="absolute top-full left-0 right-0 mt-1 bg-card border border-border rounded-md shadow-lg z-20 max-h-72 overflow-y-auto">
+            {searching ? (
+              <div className="p-3 flex justify-center"><Spinner className="w-4 h-4" /></div>
+            ) : searchResults.length === 0 ? (
+              <div className="p-3 text-xs text-muted-foreground">No units match "{searchQuery}"</div>
+            ) : (
+              searchResults.map((u: any) => (
+                <button
+                  key={u.id}
+                  onClick={() => jumpToUnit(u)}
+                  className="w-full text-left px-3 py-2 hover:bg-accent transition-colors text-sm flex items-center justify-between gap-2"
+                >
+                  <span className="font-medium">{u.serialNumber}</span>
+                  <span className="text-xs text-muted-foreground">
+                    {u.productionMonth ? format(new Date(u.productionMonth), 'MMM yyyy') : 'Unscheduled'}
+                  </span>
+                </button>
+              ))
+            )}
+          </div>
+        )}
+      </div>
+    </div>
     <div className="flex-1 overflow-auto p-4">{isLoading ? <div className="h-52 flex items-center justify-center"><Spinner /></div> : <div className="grid grid-cols-1 xl:grid-cols-3 2xl:grid-cols-6 gap-4 min-w-[1050px]">
       {months.map((month) => {
         const key = format(month, 'yyyy-MM');

@@ -37,6 +37,12 @@ export class UnitsController {
     return this.service.calendar(from, to);
   }
 
+  @Get('units/search')
+  @RequirePermissions('unit:view')
+  search(@Query('q') q?: string) {
+    return this.service.search(q ?? '');
+  }
+
   @Get('units/manager-summary')
   @RequirePermissions('unit:view')
   managerSummary() { return this.service.managerSummary(); }
