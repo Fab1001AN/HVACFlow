@@ -2,21 +2,24 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
+import { useQuery } from '@tanstack/react-query';
 import Link from 'next/link';
+import { api } from '@/lib/api';
 import { useAuthStore } from '@/store/auth.store';
 import { cn, initials } from '@/lib/utils';
 import {
   LayoutDashboard, Users, FolderOpen, ShoppingBag, Box, Settings,
   ChevronRight, LogOut, Building2, Sliders, Wrench, ClipboardList,
-  BarChart3, Cpu, GitBranch, Tag, Package, ListChecks, Menu, X, CalendarDays, Factory, GripVertical, Eye,
+  BarChart3, Cpu, GitBranch, Tag, Package, ListChecks, Menu, X, CalendarDays, Factory, GripVertical, Eye, ClipboardCheck,
 } from 'lucide-react';
 
 const NAV_ITEMS = [
   { href: '/mission-control', label: 'Mission Control', icon: LayoutDashboard },
   { href: '/production-calendar', label: 'Production Calendar', icon: CalendarDays },
   { href: '/director-dashboard', label: 'Director Dashboard', icon: BarChart3, permission: 'director:view' },
+  { href: '/planner-dashboard', label: 'Planner', icon: ClipboardCheck, permission: 'unit:plan' },
   { href: '/manager-dashboard', label: 'Manager Dashboard', icon: ClipboardList },
-  { href: '/engineering-dashboard', label: 'Engineering Manager', icon: Wrench },
+  { href: '/engineering-dashboard', label: 'Engineering Dashboard', icon: Wrench },
 ];
 
 const CONFIG_ITEMS = [
@@ -92,6 +95,17 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const isConfigActive = pathname.startsWith('/config');
   const visibleNavItems = navItems.filter((item: any) => !item.permission || hasPermission(item.permission));
 
+  // Admins get a shortcut to every department's live Mission Control
+  // board, in department sortOrder - not a separate page per department
+  // (that duplicated a lot of UI before), just Mission Control
+  // pre-filtered via query param.
+  const { data: departmentLinks = [] } = useQuery({
+    queryKey: ['departments'],
+    queryFn: () => api.departments.list({ isActive: true }),
+    enabled: canManageConfig,
+    staleTime: 60_000,
+  });
+
   return (
     <div className="flex h-screen bg-background overflow-hidden">
       {/* ─── Desktop Sidebar ─────────────────────────────────────── */}
@@ -139,6 +153,34 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
               </div>
             );
           })}
+
+          {canManageConfig && departmentLinks.length > 0 && (
+            <>
+              <div className={cn('pt-4 pb-1 px-2', !sidebarOpen && 'hidden')}>
+                <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                  Departments
+                </span>
+              </div>
+              {!sidebarOpen && <div className="border-t border-border my-2" />}
+              {departmentLinks
+                .slice()
+                .sort((a: any, b: any) => a.sortOrder - b.sortOrder)
+                .map((dept: any) => {
+                  const href = `/mission-control?departmentId=${dept.id}`;
+                  const active = pathname === '/mission-control' && typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('departmentId') === dept.id;
+                  return (
+                    <NavItem
+                      key={dept.id}
+                      href={href}
+                      icon={<div className="w-4 h-4 rounded-full flex items-center justify-center" style={{ backgroundColor: `${dept.color ?? '#6b7280'}22` }}><div className="w-2 h-2 rounded-full" style={{ backgroundColor: dept.color ?? '#6b7280' }} /></div>}
+                      label={dept.name}
+                      active={active}
+                      collapsed={!sidebarOpen}
+                    />
+                  );
+                })}
+            </>
+          )}
 
           {canManageConfig && (
             <>
@@ -231,6 +273,27 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                   />
                 );
               })}
+              {canManageConfig && departmentLinks.length > 0 && (
+                <>
+                  <div className="pt-4 pb-1 px-2">
+                    <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Departments</span>
+                  </div>
+                  {departmentLinks
+                    .slice()
+                    .sort((a: any, b: any) => a.sortOrder - b.sortOrder)
+                    .map((dept: any) => (
+                      <NavItem
+                        key={dept.id}
+                        href={`/mission-control?departmentId=${dept.id}`}
+                        icon={<div className="w-4 h-4 rounded-full flex items-center justify-center" style={{ backgroundColor: `${dept.color ?? '#6b7280'}22` }}><div className="w-2 h-2 rounded-full" style={{ backgroundColor: dept.color ?? '#6b7280' }} /></div>}
+                        label={dept.name}
+                        active={false}
+                        collapsed={false}
+                        onClick={() => setMobileMenuOpen(false)}
+                      />
+                    ))}
+                </>
+              )}
               {canManageConfig && (
                 <>
                   <div className="pt-4 pb-1 px-2">

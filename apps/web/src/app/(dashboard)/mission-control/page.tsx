@@ -1,6 +1,7 @@
 'use client';
 
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, Suspense } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { useAuthStore } from '@/store/auth.store';
@@ -14,9 +15,10 @@ import { LayoutGrid, List, Filter, RefreshCw, Rocket } from 'lucide-react';
 
 type ViewMode = 'kanban' | 'list';
 
-export default function MissionControlPage() {
+function MissionControlBoard() {
   const { user, hasPermission } = useAuthStore();
   const queryClient = useQueryClient();
+  const searchParams = useSearchParams();
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>('kanban');
 
@@ -24,20 +26,26 @@ export default function MissionControlPage() {
   const assignedDepartmentIds = (user as any)?.departments?.map((d: any) => d.departmentId) as string[] | undefined;
 
   const [filters, setFilters] = useState({
-    departmentId: '',
+    departmentId: searchParams.get('departmentId') ?? '',
     priorityLevelId: '',
     mine: false,
   });
 
-  // If the user is scoped to specific department(s) (not task:view-all),
-  // default straight to their own department instead of a mixed board
-  // they may not even have data for.
+  // A department link from the admin sidebar (?departmentId=...) always
+  // wins - it's an explicit choice, not a guess. Only fall back to
+  // auto-defaulting a scoped user's own department when there's no
+  // explicit link driving the page.
   useEffect(() => {
+    const fromUrl = searchParams.get('departmentId');
+    if (fromUrl) {
+      setFilters((f) => (f.departmentId === fromUrl ? f : { ...f, departmentId: fromUrl }));
+      return;
+    }
     if (!canViewAll && assignedDepartmentIds?.length === 1 && !filters.departmentId) {
       setFilters((f) => ({ ...f, departmentId: assignedDepartmentIds[0] }));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [canViewAll, assignedDepartmentIds?.join(',')]);
+  }, [canViewAll, assignedDepartmentIds?.join(','), searchParams.get('departmentId')]);
 
   // Board data
   const { data: board, isLoading, refetch } = useQuery({
@@ -96,6 +104,27 @@ export default function MissionControlPage() {
       toast('Unit started - first routed steps are now ready on the board', 'success');
     },
     onError: (e: any) => toast(e.message, 'error'),
+  });
+
+  // One click on the card, no side panel needed for the normal case:
+  // complete a task directly, which advances routing automatically.
+  // Falls back to opening the drawer only if the task actually requires
+  // a checklist that hasn't been completed yet (422) - that still needs
+  // its own UI, but every other task completes with a single click.
+  const completeMutation = useMutation({
+    mutationFn: (taskId: string) => api.tasks.complete(taskId, {}),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['mission-control'] });
+      toast('Task completed', 'success');
+    },
+    onError: (e: any, taskId) => {
+      if (e.status === 422) {
+        setSelectedTaskId(taskId);
+        toast('This task has a checklist to complete first', 'error');
+      } else {
+        toast(e.message ?? 'Could not complete task', 'error');
+      }
+    },
   });
 
   // Real-time board updates
@@ -247,6 +276,8 @@ export default function MissionControlPage() {
         <KanbanBoard
           columns={board?.columns ?? []}
           onTaskClick={setSelectedTaskId}
+          onComplete={(taskId) => completeMutation.mutate(taskId)}
+          completingId={completeMutation.isPending ? (completeMutation.variables as string) : null}
         />
       ) : (
         <TaskListView
@@ -261,14 +292,26 @@ export default function MissionControlPage() {
   );
 }
 
+export default function MissionControlPage() {
+  return (
+    <Suspense fallback={<div className="flex-1 flex items-center justify-center h-full"><Spinner className="w-8 h-8" /></div>}>
+      <MissionControlBoard />
+    </Suspense>
+  );
+}
+
 // ─── Kanban Board ─────────────────────────────────────────────────────────────
 
 function KanbanBoard({
   columns,
   onTaskClick,
+  onComplete,
+  completingId,
 }: {
   columns: any[];
   onTaskClick: (id: string) => void;
+  onComplete: (taskId: string) => void;
+  completingId: string | null;
 }) {
   if (columns.length === 0) {
     return (
@@ -285,14 +328,14 @@ function KanbanBoard({
     <div className="flex-1 overflow-x-auto">
       <div className="flex gap-3 p-4 h-full min-w-max">
         {columns.map((column: any) => (
-          <KanbanColumn key={column.department.id} column={column} onTaskClick={onTaskClick} />
+          <KanbanColumn key={column.department.id} column={column} onTaskClick={onTaskClick} onComplete={onComplete} completingId={completingId} />
         ))}
       </div>
     </div>
   );
 }
 
-function KanbanColumn({ column, onTaskClick }: { column: any; onTaskClick: (id: string) => void }) {
+function KanbanColumn({ column, onTaskClick, onComplete, completingId }: { column: any; onTaskClick: (id: string) => void; onComplete: (taskId: string) => void; completingId: string | null }) {
   const { department, tasks, taskCount } = column;
 
   // Group cards by process/station within the department (e.g. "Bending",
@@ -336,7 +379,13 @@ function KanbanColumn({ column, onTaskClick }: { column: any; onTaskClick: (id: 
               </div>
               <div className="space-y-2">
                 {stationTasks.map((task: any) => (
-                  <TaskCard key={task.id} task={task} onClick={() => onTaskClick(task.id)} />
+                  <TaskCard
+                    key={task.id}
+                    task={task}
+                    onClick={() => onTaskClick(task.id)}
+                    onComplete={onComplete}
+                    completing={completingId === task.id}
+                  />
                 ))}
               </div>
             </div>
