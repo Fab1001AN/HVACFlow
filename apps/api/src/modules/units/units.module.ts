@@ -51,6 +51,10 @@ export class UnitsController {
   @RequirePermissions('unit:view')
   engineeringQueue() { return this.service.engineeringQueue(); }
 
+  @Get('units/planner-queue')
+  @RequirePermissions('unit:plan')
+  plannerQueue() { return this.service.plannerQueue(); }
+
   @Get('units/director-summary')
   @RequirePermissions('director:view')
   directorSummary() {
@@ -72,6 +76,10 @@ export class UnitsController {
   @Post('units/:id/engineering/advance')
   @RequirePermissions('unit:manage')
   advanceEngineering(@Param('id') id: string) { return this.service.advanceEngineering(id); }
+
+  @Post('units/:id/mark-planned')
+  @RequirePermissions('unit:plan')
+  markPlanned(@Param('id') id: string) { return this.service.markPlanned(id); }
 
   @Post('units/:id/release')
   @RequirePermissions('unit:manage')

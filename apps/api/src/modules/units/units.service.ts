@@ -111,6 +111,28 @@ export class UnitsService {
     const units = await this.prisma.unit.findMany({ where: { deletedAt: null, status: { notIn: ['Completed', 'Dispatched'] } }, include: this.unitSummaryInclude(), orderBy: [{ isBlocked: 'desc' }, { dueDate: 'asc' }, { priorityPosition: 'asc' }] });
     const now = new Date();
 
+    // Surface the most recent "stuck" comment per unit to the Director.
+    // Any department (e.g. Assembly) can already flag a comment as a
+    // delay via isDelay on POST /units/:id/comments - that data existed
+    // but was never actually shown anywhere outside the unit's own
+    // detail page, so a director had no way to see it without opening
+    // every unit individually.
+    const latestDelayComments = await this.prisma.unitComment.findMany({
+      where: { unitId: { in: units.map((u) => u.id) }, isDelay: true },
+      orderBy: { createdAt: 'desc' },
+      include: { user: { select: { name: true } } },
+    });
+    const delayCommentByUnit = new Map<string, (typeof latestDelayComments)[number]>();
+    for (const comment of latestDelayComments) {
+      if (!delayCommentByUnit.has(comment.unitId)) delayCommentByUnit.set(comment.unitId, comment);
+    }
+    const unitsWithDelayFlag = units.map((u) => ({
+      ...u,
+      latestDelayComment: delayCommentByUnit.get(u.id)
+        ? { message: delayCommentByUnit.get(u.id)!.message, userName: delayCommentByUnit.get(u.id)!.user.name, createdAt: delayCommentByUnit.get(u.id)!.createdAt }
+        : null,
+    }));
+
     // Department workload and the delayed/testing/readyToDispatch totals
     // were referenced by the Director Dashboard UI but never actually
     // computed here - the cards silently showed 0 and the workload panel
@@ -146,7 +168,7 @@ export class UnitsService {
         released: units.filter((u) => u.productionReleaseStatus === ProductionReleaseStatus.Released).length,
         inProduction: units.filter((u) => u.productionReleaseStatus === ProductionReleaseStatus.Started).length,
       },
-      units,
+      units: unitsWithDelayFlag,
       departmentLoad,
     };
   }
@@ -190,7 +212,12 @@ export class UnitsService {
     });
 
     return {
-      awaitingRelease: enriched.filter((u) => u.productionReleaseStatus === ProductionReleaseStatus.AwaitingRelease),
+      // Renamed in meaning, not in JSON key (frontend already reads
+      // `awaitingRelease` for the Manager's actionable queue) - now
+      // means "Planner has finished and it's ready for the Production
+      // Manager to release to Fabrication", not "not yet planned".
+      awaitingRelease: enriched.filter((u) => u.productionReleaseStatus === ProductionReleaseStatus.Planned),
+      awaitingPlanning: enriched.filter((u) => u.productionReleaseStatus === ProductionReleaseStatus.AwaitingRelease && u.engineeringStatus === EngineeringStatus.ReleasedToManufacturing),
       released: enriched.filter((u) => u.productionReleaseStatus === ProductionReleaseStatus.Released),
       started: enriched.filter((u) => u.productionReleaseStatus === ProductionReleaseStatus.Started),
       blocked: enriched.filter((u) => u.isBlocked),
@@ -261,11 +288,40 @@ export class UnitsService {
     return this.prisma.unit.update({ where: { id }, data: { engineeringStatus: next, currentStage: next === EngineeringStatus.ReleasedToManufacturing ? 'Awaiting production release' : 'Engineering' }, include: this.unitSummaryInclude() });
   }
 
+  // Planner's queue: engineering-released units that haven't been marked
+  // Planned yet. This is the "assign parts" stage that sits between
+  // Engineering's release and the Production Manager's release-to-
+  // Fabrication step.
+  async plannerQueue() {
+    return this.prisma.unit.findMany({
+      where: {
+        deletedAt: null,
+        engineeringStatus: EngineeringStatus.ReleasedToManufacturing,
+        productionReleaseStatus: ProductionReleaseStatus.AwaitingRelease,
+      },
+      include: { ...this.unitSummaryInclude(), parts: { where: { deletedAt: null }, include: { partType: true } } },
+      orderBy: [{ dueDate: 'asc' }, { priorityPosition: 'asc' }],
+    });
+  }
+
+  async markPlanned(id: string) {
+    const unit = await this.prisma.unit.findUnique({ where: { id }, include: { parts: { where: { deletedAt: null } } } });
+    if (!unit) throw new NotFoundException('Unit not found');
+    if (unit.engineeringStatus !== EngineeringStatus.ReleasedToManufacturing) throw new ConflictException('Engineering must release this unit before it can be planned');
+    if (unit.productionReleaseStatus !== ProductionReleaseStatus.AwaitingRelease) throw new ConflictException('Unit is already planned or released');
+    if (unit.parts.length === 0) throw new ConflictException('Add at least one part before releasing to the Production Manager');
+    return this.prisma.unit.update({
+      where: { id },
+      data: { productionReleaseStatus: ProductionReleaseStatus.Planned },
+      include: this.unitSummaryInclude(),
+    });
+  }
+
   async releaseToProduction(id: string, userId: string) {
     const unit = await this.findOne(id);
     if (unit.engineeringStatus !== EngineeringStatus.ReleasedToManufacturing) throw new ConflictException('Engineering must be Released to Manufacturing before manager release');
     if (unit.isBlocked) throw new ConflictException('Remove the unit hold before release');
-    if (unit.productionReleaseStatus !== ProductionReleaseStatus.AwaitingRelease) throw new ConflictException('Unit has already been released');
+    if (unit.productionReleaseStatus !== ProductionReleaseStatus.Planned) throw new ConflictException('The Planner must assign parts and release this unit before the Production Manager can release it');
     const fabrication = await this.prisma.department.findFirst({
       where: { isActive: true, OR: [{ code: { equals: 'FAB', mode: 'insensitive' } }, { name: { equals: 'Fabrication', mode: 'insensitive' } }] },
     });

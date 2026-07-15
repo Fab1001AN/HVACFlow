@@ -310,6 +310,8 @@ export const api = {
     directorSummary: () => api.get<any>('/units/director-summary'),
     managerSummary: () => api.get<any>('/units/manager-summary'),
     engineeringQueue: () => api.get<any[]>('/units/engineering-queue'),
+    plannerQueue: () => api.get<any[]>('/units/planner-queue'),
+    markPlanned: (id: string) => api.post<any>(`/units/${id}/mark-planned`, {}),
     listByOrder: (orderId: string, params?: any) =>
       api.get<any>(`/orders/${orderId}/units`, { params }),
     get: (id: string) => api.get<any>(`/units/${id}`),

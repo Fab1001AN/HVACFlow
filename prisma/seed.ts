@@ -40,6 +40,7 @@ async function main() {
     { code: 'order:manage', category: 'Orders', description: 'Create and edit orders' },
     { code: 'unit:view', category: 'Units', description: 'View units' },
     { code: 'unit:manage', category: 'Units', description: 'Create and edit units' },
+    { code: 'unit:plan', category: 'Units', description: 'Assign parts to a unit and release it to the Production Manager' },
     { code: 'part:view', category: 'Parts', description: 'View parts' },
     { code: 'part:manage', category: 'Parts', description: 'Create and edit parts' },
     // Configuration
@@ -115,6 +116,15 @@ async function main() {
     create: { name: 'Manufacturing Director', description: 'Production oversight: department load, blocked units, capacity', isSystem: true },
   });
 
+  // Planner sits between Engineering's release and the Production
+  // Manager's release-to-Fabrication step: owns assigning parts to a
+  // unit before handing it off.
+  const plannerRole = await prisma.role.upsert({
+    where: { name: 'Planner' },
+    update: {},
+    create: { name: 'Planner', description: 'Assigns parts to engineering-released units before handing off to the Production Manager', isSystem: true },
+  });
+
   // Admin gets all permissions
   const allPermIds = Object.values(permissions);
   await prisma.rolePermission.deleteMany({ where: { roleId: adminRole.id } });
@@ -178,6 +188,21 @@ async function main() {
   await prisma.rolePermission.createMany({
     data: manufacturingDirectorPerms.map((code) => ({
       roleId: manufacturingDirectorRole.id,
+      permissionId: permissions[code],
+    })),
+  });
+
+  // Planner permissions - needs to see engineering-released units and
+  // build out their parts (which needs process/part-type visibility to
+  // pick from), then release to the Production Manager.
+  const plannerPerms = [
+    'unit:view', 'unit:plan', 'part:view', 'part:manage',
+    'department:view', 'process:view', 'dashboard:configure',
+  ];
+  await prisma.rolePermission.deleteMany({ where: { roleId: plannerRole.id } });
+  await prisma.rolePermission.createMany({
+    data: plannerPerms.map((code) => ({
+      roleId: plannerRole.id,
       permissionId: permissions[code],
     })),
   });

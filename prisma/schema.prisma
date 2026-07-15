@@ -45,6 +45,7 @@ enum EngineeringStatus {
 
 enum ProductionReleaseStatus {
   AwaitingRelease
+  Planned
   Released
   Started
   OnHold
