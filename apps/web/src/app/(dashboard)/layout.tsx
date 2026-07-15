@@ -8,11 +8,7 @@ import { cn, initials } from '@/lib/utils';
 import {
   LayoutDashboard, Users, FolderOpen, ShoppingBag, Box, Settings,
   ChevronRight, LogOut, Building2, Sliders, Wrench, ClipboardList,
-<<<<<<< HEAD
-  BarChart3, Cpu, GitBranch, Tag, Package, ListChecks, Menu, X, CalendarDays, Factory, GripVertical,
-=======
-  BarChart3, Cpu, GitBranch, Tag, Package, ListChecks, Menu, X, Eye,
->>>>>>> origin/main
+  BarChart3, Cpu, GitBranch, Tag, Package, ListChecks, Menu, X, CalendarDays, Factory, GripVertical, Eye,
 } from 'lucide-react';
 
 const NAV_ITEMS = [
