@@ -8,7 +8,11 @@ import { cn, initials } from '@/lib/utils';
 import {
   LayoutDashboard, Users, FolderOpen, ShoppingBag, Box, Settings,
   ChevronRight, LogOut, Building2, Sliders, Wrench, ClipboardList,
+<<<<<<< HEAD
   BarChart3, Cpu, GitBranch, Tag, Package, ListChecks, Menu, X, CalendarDays, Factory, GripVertical,
+=======
+  BarChart3, Cpu, GitBranch, Tag, Package, ListChecks, Menu, X, Eye,
+>>>>>>> origin/main
 } from 'lucide-react';
 
 const NAV_ITEMS = [
@@ -36,7 +40,7 @@ const CONFIG_ITEMS = [
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
-  const { user, isAuthenticated, logout, loadMe, hasPermission } = useAuthStore();
+  const { user, isAuthenticated, logout, loadMe, hasPermission, isImpersonating, exitViewAs } = useAuthStore();
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [navItems, setNavItems] = useState(NAV_ITEMS);
@@ -258,8 +262,22 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       )}
 
       {/* ─── Main content ─────────────────────────────────────────── */}
-      <main className="flex-1 overflow-y-auto md:pt-0 pt-14">
-        {children}
+      <main className="flex-1 overflow-y-auto md:pt-0 pt-14 flex flex-col">
+        {isImpersonating && (
+          <div className="flex-shrink-0 flex items-center gap-2 px-4 py-2 bg-amber-500/10 border-b border-amber-500/30 text-amber-500 text-sm">
+            <Eye className="w-4 h-4 flex-shrink-0" />
+            <span>
+              Previewing as <strong>{user.name}</strong> — read-only, no changes will be saved.
+            </span>
+            <button
+              onClick={() => exitViewAs()}
+              className="ml-auto flex items-center gap-1 text-xs font-medium px-2 py-1 rounded-md bg-amber-500/15 hover:bg-amber-500/25 transition-colors"
+            >
+              <LogOut className="w-3 h-3" /> Exit preview
+            </button>
+          </div>
+        )}
+        <div className="flex-1 overflow-y-auto">{children}</div>
       </main>
     </div>
   );

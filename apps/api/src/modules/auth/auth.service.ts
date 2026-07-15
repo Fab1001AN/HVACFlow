@@ -2,6 +2,7 @@ import {
   Injectable,
   UnauthorizedException,
   NotFoundException,
+  BadRequestException,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
@@ -179,6 +180,75 @@ export class AuthService {
     refreshToken,
   };
 }
+
+  /**
+   * Mints a short-lived, read-only access token scoped to `targetUserId`,
+   * for admins previewing how another user's dashboard looks. No refresh
+   * token is issued — the preview session simply expires. Writes are
+   * blocked globally for these tokens by ImpersonationGuard.
+   */
+  async impersonate(adminId: string, targetUserId: string) {
+    if (adminId === targetUserId) {
+      throw new BadRequestException('You are already viewing your own dashboard');
+    }
+
+    const admin = await this.getFullUser(adminId);
+    if (!admin) throw new NotFoundException('Admin user not found');
+
+    const target = await this.getFullUser(targetUserId);
+    if (!target) throw new NotFoundException('User not found');
+    if (!target.isActive) {
+      throw new BadRequestException('Cannot preview an inactive user');
+    }
+
+    const permissions = this.extractPermissions(target);
+    const departmentIds = target.departments.map((ud) => ud.departmentId);
+
+    const payload: JwtPayload = {
+      sub: target.id,
+      email: target.email,
+      name: target.name,
+      permissions,
+      departmentIds,
+      impersonatedBy: admin.id,
+    };
+
+    const accessSecret = this.configService.getOrThrow<string>('app.jwt.accessSecret');
+    const accessToken = await this.jwtService.signAsync(payload, {
+      secret: accessSecret,
+      expiresIn: '30m',
+    });
+
+    return {
+      accessToken,
+      user: {
+        id: target.id,
+        email: target.email,
+        name: target.name,
+        isActive: target.isActive,
+        roles: target.roles.map((ur) => ({
+          id: ur.role.id,
+          name: ur.role.name,
+          description: ur.role.description,
+          isSystem: ur.role.isSystem,
+        })),
+        departments: target.departments.map((ud) => ({
+          departmentId: ud.departmentId,
+          department: {
+            id: ud.department.id,
+            name: ud.department.name,
+            code: ud.department.code,
+            color: ud.department.color,
+            sortOrder: ud.department.sortOrder,
+            isActive: ud.department.isActive,
+          },
+          isPrimary: ud.isPrimary,
+        })),
+        permissions,
+      } satisfies AuthUser,
+      impersonatedBy: { id: admin.id, name: admin.name },
+    };
+  }
 
   private async getFullUser(userId: string) {
     return this.prisma.user.findUnique({

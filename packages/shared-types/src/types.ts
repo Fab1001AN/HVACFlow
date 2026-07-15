@@ -30,6 +30,7 @@ export interface JwtPayload {
   name: string;
   permissions: string[];   // flat merged permission code list
   departmentIds: string[]; // for department-scope filtering
+  impersonatedBy?: string; // set when this token is a read-only "view as" preview minted by an admin
 }
 
 export interface AuthTokens {
