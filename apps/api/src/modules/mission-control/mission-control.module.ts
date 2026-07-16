@@ -4,10 +4,61 @@ import { PrismaService } from '../../common/prisma/prisma.service';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { JwtPayload, TaskStatus } from '@hvacflow/shared-types';
+import { EngineeringStatus } from '@prisma/client';
+
+// Engineering/Detailing's progress (Submittal Received, Design
+// Completed, etc.) is tracked entirely on Unit.engineeringStatus - it
+// never creates a real ProductionTask, because there's no process
+// route for it the way Fabrication/Assembly/etc. have. That means its
+// department column here was always empty, even though real work is
+// clearly happening - clicking "Mark Submittal Received" on the
+// Engineering Dashboard did something, just nothing that ever showed
+// up on the shared board. Synthesized entries below give it real
+// visibility without requiring a much larger rework of the engineering
+// workflow into the task system.
+const ENGINEERING_STAGE_LABELS: Partial<Record<EngineeringStatus, string>> = {
+  [EngineeringStatus.SubmittalReceived]: 'Submittal Received',
+  [EngineeringStatus.DesigningStarted]: 'Designing',
+  [EngineeringStatus.UnitDesignCompleted]: 'Design Completed',
+  [EngineeringStatus.DrawingsCompleted]: 'Drawings Completed',
+  [EngineeringStatus.ProgrammingCompleted]: 'Programming Completed',
+};
 
 @Injectable()
 export class MissionControlService {
   constructor(private readonly prisma: PrismaService) {}
+
+  private async getEngineeringStageEntries() {
+    const units = await this.prisma.unit.findMany({
+      where: {
+        deletedAt: null,
+        // NotStarted hasn't had a button pressed yet - nothing to show.
+        // ReleasedToManufacturing has moved on to Fabrication already.
+        engineeringStatus: { notIn: [EngineeringStatus.NotStarted, EngineeringStatus.ReleasedToManufacturing] },
+      },
+      include: {
+        unitType: true,
+        priorityLevel: true,
+        order: { include: { project: { include: { customer: { select: { name: true } } } } } },
+      },
+      orderBy: [{ priorityLevel: { sortOrder: 'desc' } }, { dueDate: 'asc' }],
+    });
+
+    return units.map((unit) => ({
+      id: `engineering-${unit.id}`,
+      status: TaskStatus.InProgress,
+      processDefinition: { name: ENGINEERING_STAGE_LABELS[unit.engineeringStatus] ?? unit.engineeringStatus },
+      priorityLevel: unit.priorityLevel,
+      assignedUser: null,
+      machine: null,
+      part: null,
+      unit,
+      // Not a real task - clicking through to a task drawer would fail
+      // (no ProductionTask with this id exists). Flagged so the
+      // frontend can route a click to the unit page instead.
+      isSynthetic: true,
+    }));
+  }
 
   async getBoard(
     callerDeptIds: string[],
@@ -55,6 +106,14 @@ export class MissionControlService {
       TaskStatus.PendingVerification,
       TaskStatus.OnHold,
     ];
+
+    // Fetched once outside the per-department loop since it's not
+    // filtered by departmentId the same way real tasks are. Skipped
+    // entirely if Detailing isn't even in the current department list
+    // (e.g. viewing a single other department) - no point querying it.
+    const engineeringEntries = departments.some((d) => d.code === 'ENG')
+      ? await this.getEngineeringStageEntries()
+      : [];
 
     // Build Kanban columns in parallel
     const columns = await Promise.all(
@@ -107,10 +166,22 @@ export class MissionControlService {
           ],
         });
 
+        // Detailing/Engineering never has real ProductionTask rows -
+        // splice in the synthetic entries here instead, respecting the
+        // same priority/mine filters real tasks already went through.
+        const isEngineeringDept = dept.code === 'ENG';
+        const filteredEngineeringEntries = isEngineeringDept
+          ? engineeringEntries.filter((e) =>
+              (!filters.priorityLevelId || e.priorityLevel?.id === filters.priorityLevelId) &&
+              !filters.mine, // "My Tasks" has no meaning here - nobody's assigned to an engineering stage
+            )
+          : [];
+        const allTasks = isEngineeringDept ? [...tasks, ...filteredEngineeringEntries] : tasks;
+
         return {
           department: dept,
-          taskCount: tasks.length,
-          tasks,
+          taskCount: allTasks.length,
+          tasks: allTasks,
         };
       }),
     );

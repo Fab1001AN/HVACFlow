@@ -1,5 +1,6 @@
 'use client';
 
+import { useRouter } from 'next/navigation';
 import { cn, getElapsed, STATUS_BG } from '@/lib/utils';
 import { TaskStatus } from '@hvacflow/shared-types';
 import { Avatar, Button } from '@/components/shared';
@@ -14,20 +15,30 @@ interface TaskCardProps {
 }
 
 export function TaskCard({ task, onClick, onComplete, completing }: TaskCardProps) {
+  const router = useRouter();
   const isInProgress = task.status === TaskStatus.InProgress;
   const isPendingVerification = task.status === TaskStatus.PendingVerification;
   const isOnHold = task.status === TaskStatus.OnHold;
   const isReady = task.status === TaskStatus.Ready;
-  const canComplete = (isReady || isInProgress) && !!onComplete;
+  // Engineering-stage entries aren't real ProductionTask rows (there's
+  // no process route behind them) - no checklist/complete flow applies,
+  // that happens on the Engineering Dashboard instead. Clicking one
+  // navigates to the unit rather than trying to open a task drawer for
+  // a task id that doesn't actually exist.
+  const isSynthetic = !!task.isSynthetic;
+  const canComplete = (isReady || isInProgress) && !!onComplete && !isSynthetic;
   const unitSerial = task.part?.unit?.serialNumber ?? task.unit?.serialNumber ?? '—';
   const partLabel = task.part ? `${task.part.partType?.name} · ${task.part.identifier}` : null;
+  const handleClick = isSynthetic
+    ? (task.unit?.id ? () => router.push(`/units/${task.unit.id}`) : undefined)
+    : onClick;
 
   return (
     <div
-      onClick={onClick}
+      onClick={handleClick}
       className={cn(
         'task-card group select-none',
-        !onClick && 'cursor-default hover:border-border hover:bg-card hover:shadow-none',
+        !handleClick && 'cursor-default hover:border-border hover:bg-card hover:shadow-none',
         isOnHold && 'opacity-60',
         isPendingVerification && 'border-orange-500/40',
       )}
