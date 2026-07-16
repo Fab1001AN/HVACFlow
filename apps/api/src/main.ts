@@ -3,6 +3,7 @@ import { ValidationPipe, ClassSerializerInterceptor } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { AppModule } from './app.module';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
+import { DecimalTransformInterceptor } from './common/interceptors/decimal-transform.interceptor';
 import { ConfigService } from '@nestjs/config';
 
 async function bootstrap() {
@@ -39,8 +40,15 @@ async function bootstrap() {
   );
 
   // ─── Global serializer (excludes @Exclude() fields like passwordHash) ───────
+  // DecimalTransformInterceptor MUST come after ClassSerializerInterceptor
+  // in this array - Nest runs later-registered interceptors' response
+  // transforms first (closer to the raw handler output), so this
+  // ordering makes Decimal->number conversion happen BEFORE
+  // ClassSerializerInterceptor's instanceToPlain() ever sees a Decimal
+  // instance to mangle. Swapping this order would silently undo the fix.
   app.useGlobalInterceptors(
     new ClassSerializerInterceptor(app.get(Reflector)),
+    new DecimalTransformInterceptor(),
   );
 
   // ─── Global exception filter ────────────────────────────────────────────────
