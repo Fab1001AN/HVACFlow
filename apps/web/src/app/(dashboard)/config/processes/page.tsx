@@ -111,16 +111,27 @@ export default function ProcessesConfigPage() {
             <div key={deptName}>
               <h3 className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-2 px-1">{deptName}</h3>
               <Card className="overflow-hidden">
-                <table className="w-full text-sm">
+                <table className="w-full text-sm table-fixed">
+                  <colgroup>
+                    <col />
+                    <col className="w-28" />
+                    <col className="w-16" />
+                    <col className="w-20" />
+                    <col className="w-20" />
+                    <col className="w-16" />
+                    <col className="w-16" />
+                    <col className="w-32" />
+                  </colgroup>
                   <thead className="bg-secondary border-b border-border">
                     <tr>
                       <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground">Name</th>
                       <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground">Applies To</th>
-                      <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground">Verify</th>
-                      <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground">Checklist</th>
-                      <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground">Optional</th><th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground">Weight</th>
+                      <th className="px-4 py-2.5 text-center text-xs font-medium text-muted-foreground">Verify</th>
+                      <th className="px-4 py-2.5 text-center text-xs font-medium text-muted-foreground">Checklist</th>
+                      <th className="px-4 py-2.5 text-center text-xs font-medium text-muted-foreground">Optional</th>
+                      <th className="px-4 py-2.5 text-right text-xs font-medium text-muted-foreground">Weight</th>
                       <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground">Est.</th>
-                      <th className="w-20" />
+                      <th />
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-border">
@@ -146,7 +157,8 @@ export default function ProcessesConfigPage() {
                         <td className="px-4 py-2.5 text-center">
                           {proc.requiresChecklist ? <CheckSquare className="w-3.5 h-3.5 text-blue-400 mx-auto" /> : <span className="text-muted-foreground">—</span>}
                         </td>
-                        <td className="px-4 py-2.5 text-center">{proc.isOptional ? 'Yes' : 'No'}</td><td className="px-4 py-2.5 text-muted-foreground tabular-nums">{Number(proc.weight).toFixed(1)}×</td>
+                        <td className="px-4 py-2.5 text-center">{proc.isOptional ? 'Yes' : 'No'}</td>
+                        <td className="px-4 py-2.5 text-right text-muted-foreground tabular-nums">{Number(proc.weight ?? 1).toFixed(1)}×</td>
                         <td className="px-4 py-2.5 text-muted-foreground text-xs">{proc.defaultEstimatedMinutes ? `${proc.defaultEstimatedMinutes}m` : '—'}</td>
                         <td className="px-4 py-2.5">
                           <div className="flex items-center gap-1">
