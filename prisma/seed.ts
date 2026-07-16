@@ -253,7 +253,7 @@ async function main() {
   console.log('Creating departments...');
 
   const departmentData = [
-    { name: 'Engineering', code: 'ENG', color: '#0ea5e9', sortOrder: 1 },
+    { name: 'Detailing', code: 'ENG', color: '#0ea5e9', sortOrder: 1 },
     { name: 'Fabrication', code: 'FAB', color: '#6366f1', sortOrder: 3 },
     { name: 'Purchasing', code: 'PURCH', color: '#f59e0b', sortOrder: 4 },
     { name: 'Assembly', code: 'ASSY', color: '#10b981', sortOrder: 5 },
