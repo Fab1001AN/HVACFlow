@@ -162,7 +162,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         </div>
 
         {/* Navigation */}
-        <nav className="flex-1 overflow-y-auto py-3 space-y-0.5 px-2">
+        <nav className="flex-1 min-h-0 overflow-y-auto py-3 space-y-0.5 px-2">
           {visibleNavItems.map((item) => {
             const Icon = item.icon;
             const active = pathname === item.href || pathname.startsWith(item.href + '/');
@@ -292,10 +292,10 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           onClick={() => setMobileMenuOpen(false)}
         >
           <div
-            className="w-64 h-full bg-card border-r border-border pt-14"
+            className="w-64 h-full bg-card border-r border-border pt-14 flex flex-col"
             onClick={(e) => e.stopPropagation()}
           >
-            <nav className="flex-1 overflow-y-auto py-3 space-y-0.5 px-2">
+            <nav className="flex-1 min-h-0 overflow-y-auto py-3 space-y-0.5 px-2">
               {visibleNavItems.map((item) => {
                 const Icon = item.icon;
                 const active = pathname === item.href;
