@@ -19,7 +19,7 @@ export default function LoginPage() {
     setLoading(true);
     try {
       await login(email, password);
-      router.push('/mission-control');
+      router.push('/shop-floor');
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Login failed. Please try again.');
     } finally {

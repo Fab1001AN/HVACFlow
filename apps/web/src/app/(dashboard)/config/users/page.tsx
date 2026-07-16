@@ -62,7 +62,7 @@ export default function UsersPage() {
     setViewAsLoadingId(user.id);
     try {
       await viewAs(user.id);
-      router.push('/mission-control');
+      router.push('/shop-floor');
     } catch (err: any) {
       toast(err.message ?? 'Could not start preview', 'error');
     } finally {

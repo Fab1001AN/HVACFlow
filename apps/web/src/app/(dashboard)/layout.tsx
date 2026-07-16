@@ -14,7 +14,8 @@ import {
 } from 'lucide-react';
 
 const NAV_ITEMS = [
-  { href: '/mission-control', label: 'Mission Control', icon: LayoutDashboard },
+  { href: '/shop-floor', label: 'Shop Floor Dashboard', icon: LayoutDashboard },
+  { href: '/department-work', label: 'Supervisor Dashboard', icon: Factory },
   { href: '/production-calendar', label: 'Production Calendar', icon: CalendarDays },
   { href: '/director-dashboard', label: 'Director Dashboard', icon: BarChart3, permission: 'director:view' },
   { href: '/planner-dashboard', label: 'Planner', icon: ClipboardCheck, permission: 'unit:plan' },
@@ -166,8 +167,8 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                 .slice()
                 .sort((a: any, b: any) => a.sortOrder - b.sortOrder)
                 .map((dept: any) => {
-                  const href = `/mission-control?departmentId=${dept.id}`;
-                  const active = pathname === '/mission-control' && typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('departmentId') === dept.id;
+                  const href = `/shop-floor?departmentId=${dept.id}`;
+                  const active = pathname === '/shop-floor' && typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('departmentId') === dept.id;
                   return (
                     <NavItem
                       key={dept.id}
@@ -284,7 +285,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                     .map((dept: any) => (
                       <NavItem
                         key={dept.id}
-                        href={`/mission-control?departmentId=${dept.id}`}
+                        href={`/shop-floor?departmentId=${dept.id}`}
                         icon={<div className="w-4 h-4 rounded-full flex items-center justify-center" style={{ backgroundColor: `${dept.color ?? '#6b7280'}22` }}><div className="w-2 h-2 rounded-full" style={{ backgroundColor: dept.color ?? '#6b7280' }} /></div>}
                         label={dept.name}
                         active={false}
