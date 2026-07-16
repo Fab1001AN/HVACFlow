@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { Badge, Button, Card, EmptyState, Input, Modal, PageHeader, ProgressBar, Select, Spinner, toast } from '@/components/shared';
@@ -9,7 +9,7 @@ import { TaskCard } from '@/features/mission-control/task-card';
 import { TaskDrawer } from '@/features/tasks/task-drawer';
 import { useAuthStore } from '@/store/auth.store';
 import { useWsEvent } from '@/lib/websocket';
-import { Rocket, CheckCircle2, Clock3, Hammer, Package } from 'lucide-react';
+import { Rocket, CheckCircle2, Clock3, Hammer, Package, GripVertical } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 // The real interactive tool for a department supervisor - click a
@@ -156,26 +156,12 @@ export default function SupervisorDashboardPage() {
                 ) : tasks.length === 0 ? (
                   <EmptyState title="No active work" description="No routed parts are ready or active in this department." />
                 ) : (
-                  <div className="space-y-6">
-                    {[...stations.entries()].map(([stationName, stationTasks]) => (
-                      <div key={stationName}>
-                        <div className="flex items-center justify-between mb-2">
-                          <h3 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">{stationName}</h3>
-                          <Badge variant="muted">{stationTasks.length}</Badge>
-                        </div>
-                        <div className="grid sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
-                          {stationTasks.map((task: any) => (
-                            <TaskCard
-                              key={task.id}
-                              task={task}
-                              onComplete={(taskId) => completeMutation.mutate(taskId)}
-                              completing={completeMutation.isPending && completeMutation.variables === task.id}
-                            />
-                          ))}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
+                  <StationColumns
+                    departmentId={departmentId}
+                    stations={stations}
+                    onComplete={(taskId) => completeMutation.mutate(taskId)}
+                    completingTaskId={completeMutation.isPending ? (completeMutation.variables as string) : null}
+                  />
                 )}
               </>
             )}
@@ -183,6 +169,110 @@ export default function SupervisorDashboardPage() {
         )}
       </div>
       {!isAssembly && <TaskDrawer taskId={selectedTaskId} onClose={() => setSelectedTaskId(null)} />}
+    </div>
+  );
+}
+
+function StationColumns({
+  departmentId,
+  stations,
+  onComplete,
+  completingTaskId,
+}: {
+  departmentId: string;
+  stations: Map<string, any[]>;
+  onComplete: (taskId: string) => void;
+  completingTaskId: string | null;
+}) {
+  const storageKey = `hvacflow:station-order:${departmentId}`;
+  const availableStations = [...stations.keys()];
+
+  const [stationOrder, setStationOrder] = useState<string[]>(availableStations);
+  const [draggedStation, setDraggedStation] = useState<string | null>(null);
+  const loadedKeyRef = useRef<string | null>(null);
+
+  // Load the saved order once per department, then reconcile with
+  // whatever stations actually have work right now - keep the user's
+  // arrangement for stations still present, append any new ones, drop
+  // ones that no longer have anything in them.
+  useEffect(() => {
+    if (loadedKeyRef.current === storageKey) {
+      setStationOrder((current) => {
+        const kept = current.filter((s) => availableStations.includes(s));
+        const added = availableStations.filter((s) => !current.includes(s));
+        return [...kept, ...added];
+      });
+      return;
+    }
+    loadedKeyRef.current = storageKey;
+    const saved = localStorage.getItem(storageKey);
+    if (saved) {
+      try {
+        const order = JSON.parse(saved) as string[];
+        const kept = order.filter((s) => availableStations.includes(s));
+        const added = availableStations.filter((s) => !order.includes(s));
+        setStationOrder([...kept, ...added]);
+        return;
+      } catch {
+        localStorage.removeItem(storageKey);
+      }
+    }
+    setStationOrder(availableStations);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [storageKey, availableStations.join(',')]);
+
+  function moveStation(targetName: string) {
+    if (!draggedStation || draggedStation === targetName) return;
+    setStationOrder((current) => {
+      const next = [...current];
+      const fromIndex = next.indexOf(draggedStation);
+      const toIndex = next.indexOf(targetName);
+      if (fromIndex < 0 || toIndex < 0) return current;
+      const [moved] = next.splice(fromIndex, 1);
+      next.splice(toIndex, 0, moved);
+      localStorage.setItem(storageKey, JSON.stringify(next));
+      return next;
+    });
+    setDraggedStation(null);
+  }
+
+  return (
+    <div className="overflow-x-auto pb-2">
+      <div className="flex gap-4 min-w-max">
+        {stationOrder.map((stationName) => {
+          const stationTasks = stations.get(stationName) ?? [];
+          return (
+            <div
+              key={stationName}
+              draggable
+              onDragStart={() => setDraggedStation(stationName)}
+              onDragEnd={() => setDraggedStation(null)}
+              onDragOver={(e) => e.preventDefault()}
+              onDrop={() => moveStation(stationName)}
+              className={cn('flex flex-col w-72 flex-shrink-0 cursor-grab active:cursor-grabbing', draggedStation === stationName && 'opacity-40')}
+            >
+              <div className="flex items-center justify-between mb-2 px-1">
+                <div className="flex items-center gap-1.5">
+                  <GripVertical className="w-3.5 h-3.5 text-muted-foreground" />
+                  <h3 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">{stationName}</h3>
+                </div>
+                <Badge variant="muted">{stationTasks.length}</Badge>
+              </div>
+              <div className="space-y-2">
+                {stationTasks.map((task: any) => (
+                  <TaskCard
+                    key={task.id}
+                    task={task}
+                    onComplete={onComplete}
+                    completing={completingTaskId === task.id}
+                  />
+                ))}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      <p className="text-[11px] text-muted-foreground mt-3">Drag a station's header to reorder it - your layout is remembered.</p>
     </div>
   );
 }

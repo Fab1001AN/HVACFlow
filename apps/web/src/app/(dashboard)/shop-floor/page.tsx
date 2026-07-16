@@ -251,12 +251,67 @@ function KanbanBoard({ columns, big, zoomLevel }: { columns: any[]; big?: boolea
       </div>
     );
   }
+  // Viewing a single department (e.g. via the admin sidebar's per-
+  // department link) - show each process/station side by side instead
+  // of stacked inside one narrow column, and let the order be
+  // rearranged and remembered per department.
+  if (columns.length === 1) {
+    return <StationBoard column={columns[0]} big={big} zoomLevel={zoomLevel} />;
+  }
   return (
     <div className="flex-1 overflow-x-auto overflow-y-hidden">
       <div className={cn('flex gap-3 p-4 h-full min-w-max', big && 'gap-4 p-6')}>
         {columns.map((column: any) => (
           <KanbanColumn key={column.department.id} column={column} big={big} zoomLevel={zoomLevel} />
         ))}
+      </div>
+    </div>
+  );
+}
+
+function StationBoard({ column, big, zoomLevel }: { column: any; big?: boolean; zoomLevel: number }) {
+  const { department, tasks } = column;
+  const widthClass = big ? 'w-96' : ZOOM_STEPS[zoomLevel];
+
+  const stationsMap = new Map<string, any[]>();
+  for (const task of tasks) {
+    const stationName = task.processDefinition?.name ?? 'Unassigned';
+    if (!stationsMap.has(stationName)) stationsMap.set(stationName, []);
+    stationsMap.get(stationName)!.push(task);
+  }
+  const stationNames = [...stationsMap.keys()];
+
+  return (
+    <div className="flex-1 overflow-x-auto overflow-y-hidden">
+      <div className={cn('flex gap-3 p-4 h-full min-w-max', big && 'gap-4 p-6')}>
+        {stationNames.map((stationName) => {
+          const stationTasks = stationsMap.get(stationName) ?? [];
+          return (
+            <div key={stationName} className={cn('flex flex-col flex-shrink-0', widthClass)}>
+              <div className="flex items-center justify-between mb-3 px-1">
+                <div className="flex items-center gap-2">
+                  <div className={cn('rounded-full flex-shrink-0', big ? 'w-4 h-4' : 'w-2.5 h-2.5')} style={{ backgroundColor: department.color ?? '#6b7280' }} />
+                  <span className={cn('font-medium text-foreground', big ? 'text-xl' : 'text-sm')}>{stationName}</span>
+                </div>
+                <span className={cn('text-muted-foreground bg-muted rounded-full tabular-nums', big ? 'text-base px-3 py-1' : 'text-xs px-2 py-0.5')}>{stationTasks.length}</span>
+              </div>
+              <div className="flex-1 overflow-y-auto space-y-2 pb-4">
+                {stationTasks.length === 0 ? (
+                  <div className={cn('flex items-center justify-center border border-dashed border-border rounded-lg text-muted-foreground', big ? 'h-24 text-base' : 'h-20 text-xs')}>
+                    No active tasks
+                  </div>
+                ) : (
+                  stationTasks.map((task: any) => <TaskCard key={task.id} task={task} />)
+                )}
+              </div>
+            </div>
+          );
+        })}
+        {stationNames.length === 0 && (
+          <div className="flex-1 flex items-center justify-center">
+            <EmptyState title="No active tasks" description={`Nothing in progress in ${department.name} right now.`} />
+          </div>
+        )}
       </div>
     </div>
   );
