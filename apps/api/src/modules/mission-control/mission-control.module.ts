@@ -25,12 +25,26 @@ export class MissionControlService {
       ? undefined // all departments
       : callerDeptIds;
 
+    // An explicit ?departmentId= filter must narrow within the caller's
+    // allowed departments, never replace that restriction - previously
+    // both conditions spread the same `id` key into one where object,
+    // so the filter silently overrode the permission check entirely: a
+    // department-scoped user could request any other department's board
+    // just by passing its id in the query string.
+    let allowedDeptIds: string[] | undefined = effectiveDeptIds;
+    if (filters.departmentId) {
+      if (!allowedDeptIds || allowedDeptIds.includes(filters.departmentId)) {
+        allowedDeptIds = [filters.departmentId];
+      } else {
+        allowedDeptIds = []; // requested a department outside their scope - show nothing, don't leak it
+      }
+    }
+
     // Load departments in sorted order (Kanban column order)
     const departments = await this.prisma.department.findMany({
       where: {
         isActive: true,
-        ...(effectiveDeptIds ? { id: { in: effectiveDeptIds } } : {}),
-        ...(filters.departmentId ? { id: filters.departmentId } : {}),
+        ...(allowedDeptIds ? { id: { in: allowedDeptIds } } : {}),
       },
       orderBy: { sortOrder: 'asc' },
     });
