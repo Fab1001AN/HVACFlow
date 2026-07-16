@@ -45,6 +45,10 @@ export class AddUnitCommentDto {
   @IsOptional() @IsBoolean() isDelay?: boolean;
 }
 
+export class StartAssemblyDto {
+  @IsString() teamName: string;
+}
+
 const ENGINEERING_SEQUENCE: EngineeringStatus[] = [
   EngineeringStatus.NotStarted,
   EngineeringStatus.SubmittalReceived,
@@ -304,6 +308,36 @@ export class UnitsService {
     });
   }
 
+  // Assembly's Upcoming/WIP view: WIP = Assembly has actually started
+  // building (assemblyStartedAt set); Upcoming = already in production
+  // but Assembly hasn't started yet - shown so Assembly can see what's
+  // coming and what vendor parts are/aren't in yet. Every unit's own
+  // Parts are inherently "from Fabrication" (VendorPart is a fully
+  // separate table now), so no extra filtering needed there.
+  async assemblySummary() {
+    const include = {
+      ...this.unitSummaryInclude(),
+      parts: { where: { deletedAt: null }, include: { partType: true } },
+      vendorParts: { include: { partType: true } },
+    };
+    const baseWhere = { deletedAt: null, status: { notIn: [UnitStatus.Completed, UnitStatus.Dispatched] } };
+
+    const [wip, upcoming] = await Promise.all([
+      this.prisma.unit.findMany({
+        where: { ...baseWhere, assemblyStartedAt: { not: null } },
+        include,
+        orderBy: [{ dueDate: 'asc' }],
+      }),
+      this.prisma.unit.findMany({
+        where: { ...baseWhere, assemblyStartedAt: null, productionReleaseStatus: ProductionReleaseStatus.Started },
+        include,
+        orderBy: [{ dueDate: 'asc' }],
+      }),
+    ]);
+
+    return { wip, upcoming };
+  }
+
   async markPlanned(id: string) {
     const unit = await this.prisma.unit.findUnique({ where: { id }, include: { parts: { where: { deletedAt: null } } } });
     if (!unit) throw new NotFoundException('Unit not found');
@@ -347,6 +381,22 @@ export class UnitsService {
       for (const task of firstTasks) await tx.productionTask.update({ where: { id: task!.id }, data: { status: TaskStatus.Ready } });
       const firstDepartmentId = firstTasks[0]?.departmentId ?? unit.currentDepartmentId;
       await tx.unit.update({ where: { id }, data: { productionReleaseStatus: ProductionReleaseStatus.Started, manufacturingStartedAt: new Date(), status: UnitStatus.InProgress, currentDepartmentId: firstDepartmentId, currentStage: firstTasks[0]?.processDefinition?.name ?? 'Manufacturing' } });
+    });
+    return this.findOne(id);
+  }
+
+  // Assembly's "Start Building Unit" - separate from startManufacturing
+  // (which is Fabrication's kickoff). Captures the team name assigned to
+  // the unit; doesn't gate on any particular upstream department having
+  // finished, since parts can be arriving from multiple sources
+  // (Fabrication tasks, vendor parts) concurrently by the time Assembly
+  // is ready to begin.
+  async startAssembly(id: string, teamName: string) {
+    const unit = await this.findOne(id);
+    if (unit.assemblyStartedAt) throw new ConflictException('Assembly has already started for this unit');
+    await this.prisma.unit.update({
+      where: { id },
+      data: { assignedTeamName: teamName, assemblyStartedAt: new Date() },
     });
     return this.findOne(id);
   }

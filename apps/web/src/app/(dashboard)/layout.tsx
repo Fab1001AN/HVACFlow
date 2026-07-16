@@ -19,6 +19,7 @@ const NAV_ITEMS = [
   { href: '/production-calendar', label: 'Production Calendar', icon: CalendarDays },
   { href: '/director-dashboard', label: 'Director Dashboard', icon: BarChart3, permission: 'director:view' },
   { href: '/planner-dashboard', label: 'Planner', icon: ClipboardCheck, permission: 'unit:plan' },
+  { href: '/purchasing-dashboard', label: 'Purchasing', icon: Package, permission: 'vendor-part:manage' },
   { href: '/manager-dashboard', label: 'Manager Dashboard', icon: ClipboardList },
   { href: '/engineering-dashboard', label: 'Engineering Dashboard', icon: Wrench },
 ];

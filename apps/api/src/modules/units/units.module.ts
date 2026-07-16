@@ -6,6 +6,7 @@ import {
   UpdateUnitDto,
   MoveUnitDto,
   AddUnitCommentDto,
+  StartAssemblyDto,
 } from './units.service';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
@@ -55,6 +56,10 @@ export class UnitsController {
   @RequirePermissions('unit:plan')
   plannerQueue() { return this.service.plannerQueue(); }
 
+  @Get('units/assembly-summary')
+  @RequirePermissions('unit:view')
+  assemblySummary() { return this.service.assemblySummary(); }
+
   @Get('units/director-summary')
   @RequirePermissions('director:view')
   directorSummary() {
@@ -88,6 +93,10 @@ export class UnitsController {
   @Post('units/:id/start-manufacturing')
   @RequirePermissions('task:start')
   startManufacturing(@Param('id') id: string) { return this.service.startManufacturing(id); }
+
+  @Post('units/:id/start-assembly')
+  @RequirePermissions('task:start')
+  startAssembly(@Param('id') id: string, @Body() dto: StartAssemblyDto) { return this.service.startAssembly(id, dto.teamName); }
 
   @Post('units/:id/comments')
   @RequirePermissions('unit:view')
