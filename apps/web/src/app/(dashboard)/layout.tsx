@@ -46,6 +46,24 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [navItems, setNavItems] = useState(NAV_ITEMS);
   const [draggedNavHref, setDraggedNavHref] = useState<string | null>(null);
+  const [deptSectionExpanded, setDeptSectionExpanded] = useState(true);
+  const [configSectionExpanded, setConfigSectionExpanded] = useState(true);
+
+  useEffect(() => {
+    const dept = localStorage.getItem('hvacflow:sidebar-departments-expanded');
+    const config = localStorage.getItem('hvacflow:sidebar-config-expanded');
+    if (dept !== null) setDeptSectionExpanded(dept === 'true');
+    if (config !== null) setConfigSectionExpanded(config === 'true');
+  }, []);
+
+  const toggleDeptSection = () => setDeptSectionExpanded((v) => {
+    localStorage.setItem('hvacflow:sidebar-departments-expanded', String(!v));
+    return !v;
+  });
+  const toggleConfigSection = () => setConfigSectionExpanded((v) => {
+    localStorage.setItem('hvacflow:sidebar-config-expanded', String(!v));
+    return !v;
+  });
 
   useEffect(() => {
     const saved = localStorage.getItem('hvacflow:nav-order');
@@ -168,13 +186,17 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
           {canManageConfig && departmentLinks.length > 0 && (
             <>
-              <div className={cn('pt-4 pb-1 px-2', !sidebarOpen && 'hidden')}>
+              <button
+                onClick={toggleDeptSection}
+                className={cn('w-full flex items-center justify-between pt-4 pb-1 px-2', !sidebarOpen && 'hidden')}
+              >
                 <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
                   Departments
                 </span>
-              </div>
+                <ChevronRight className={cn('w-3.5 h-3.5 text-muted-foreground transition-transform', deptSectionExpanded && 'rotate-90')} />
+              </button>
               {!sidebarOpen && <div className="border-t border-border my-2" />}
-              {departmentLinks
+              {(deptSectionExpanded || !sidebarOpen) && departmentLinks
                 .slice()
                 .sort((a: any, b: any) => a.sortOrder - b.sortOrder)
                 .map((dept: any) => {
@@ -196,13 +218,17 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
           {canManageConfig && (
             <>
-              <div className={cn('pt-4 pb-1 px-2', !sidebarOpen && 'hidden')}>
+              <button
+                onClick={toggleConfigSection}
+                className={cn('w-full flex items-center justify-between pt-4 pb-1 px-2', !sidebarOpen && 'hidden')}
+              >
                 <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
                   Configuration
                 </span>
-              </div>
+                <ChevronRight className={cn('w-3.5 h-3.5 text-muted-foreground transition-transform', configSectionExpanded && 'rotate-90')} />
+              </button>
               {!sidebarOpen && <div className="border-t border-border my-2" />}
-              {CONFIG_ITEMS.map((item) => {
+              {(configSectionExpanded || !sidebarOpen) && CONFIG_ITEMS.map((item) => {
                 const Icon = item.icon;
                 const active = pathname === item.href;
                 return (
@@ -287,10 +313,11 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
               })}
               {canManageConfig && departmentLinks.length > 0 && (
                 <>
-                  <div className="pt-4 pb-1 px-2">
+                  <button onClick={toggleDeptSection} className="w-full flex items-center justify-between pt-4 pb-1 px-2">
                     <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Departments</span>
-                  </div>
-                  {departmentLinks
+                    <ChevronRight className={cn('w-3.5 h-3.5 text-muted-foreground transition-transform', deptSectionExpanded && 'rotate-90')} />
+                  </button>
+                  {deptSectionExpanded && departmentLinks
                     .slice()
                     .sort((a: any, b: any) => a.sortOrder - b.sortOrder)
                     .map((dept: any) => (
@@ -308,10 +335,11 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
               )}
               {canManageConfig && (
                 <>
-                  <div className="pt-4 pb-1 px-2">
+                  <button onClick={toggleConfigSection} className="w-full flex items-center justify-between pt-4 pb-1 px-2">
                     <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Configuration</span>
-                  </div>
-                  {CONFIG_ITEMS.map((item) => {
+                    <ChevronRight className={cn('w-3.5 h-3.5 text-muted-foreground transition-transform', configSectionExpanded && 'rotate-90')} />
+                  </button>
+                  {configSectionExpanded && CONFIG_ITEMS.map((item) => {
                     const Icon = item.icon;
                     const active = pathname === item.href;
                     return (
@@ -334,7 +362,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       )}
 
       {/* ─── Main content ─────────────────────────────────────────── */}
-      <main className="flex-1 overflow-y-auto md:pt-0 pt-14 flex flex-col">
+      <main className="flex-1 min-w-0 overflow-y-auto md:pt-0 pt-14 flex flex-col">
         {isImpersonating && (
           <div className="flex-shrink-0 flex items-center gap-2 px-4 py-2 bg-amber-500/10 border-b border-amber-500/30 text-amber-500 text-sm">
             <Eye className="w-4 h-4 flex-shrink-0" />
@@ -349,7 +377,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             </button>
           </div>
         )}
-        <div className="flex-1 overflow-y-auto">{children}</div>
+        <div className="flex-1 min-w-0 overflow-y-auto">{children}</div>
       </main>
     </div>
   );

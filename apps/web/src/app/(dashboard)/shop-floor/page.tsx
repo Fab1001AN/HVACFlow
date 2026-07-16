@@ -10,7 +10,7 @@ import { cn, STATUS_BG, STATUS_LABELS } from '@/lib/utils';
 import { TaskCard } from '@/features/mission-control/task-card';
 import { Spinner, EmptyState, Avatar } from '@/components/shared';
 import { useWsEvent } from '@/lib/websocket';
-import { LayoutGrid, List, Filter, RefreshCw, Maximize, Minimize } from 'lucide-react';
+import { LayoutGrid, List, Filter, RefreshCw, Maximize, Minimize, Minus, Plus } from 'lucide-react';
 
 // Shop Floor Dashboard - a live, read-only status board (renamed from
 // Mission Control). Meant to run on a TV on the shop floor so everyone
@@ -20,12 +20,20 @@ import { LayoutGrid, List, Filter, RefreshCw, Maximize, Minimize } from 'lucide-
 // interactive tool for that.
 type ViewMode = 'kanban' | 'list';
 
+// Column width steps for the zoom control - smaller width = more
+// department columns visible at once without scrolling, larger = fewer
+// but easier to read. Index 2 is the default (matches the previous
+// fixed w-72).
+const ZOOM_STEPS = ['w-56', 'w-64', 'w-72', 'w-80', 'w-96'];
+const DEFAULT_ZOOM = 2;
+
 function ShopFloorBoard() {
   const { hasPermission } = useAuthStore();
   const queryClient = useQueryClient();
   const searchParams = useSearchParams();
   const [viewMode, setViewMode] = useState<ViewMode>('kanban');
   const [tvMode, setTvMode] = useState(false);
+  const [zoomLevel, setZoomLevel] = useState(DEFAULT_ZOOM);
   const containerRef = useRef<HTMLDivElement | null>(null);
 
   const [filters, setFilters] = useState({
@@ -191,9 +199,35 @@ function ShopFloorBoard() {
       {isLoading ? (
         <div className="flex-1 flex items-center justify-center"><Spinner className="w-8 h-8" /></div>
       ) : viewMode === 'kanban' || tvMode ? (
-        <KanbanBoard columns={board?.columns ?? []} big={tvMode} />
+        <KanbanBoard columns={board?.columns ?? []} big={tvMode} zoomLevel={zoomLevel} />
       ) : (
         <TaskListView columns={board?.columns ?? []} />
+      )}
+
+      {/* ─── Zoom controls - shrink column width to fit more departments
+           on screen at once without scrolling, or grow for readability.
+           Hidden in TV mode (that already scales everything up on its
+           own terms) and on the list view (nothing to zoom there). ─── */}
+      {!tvMode && viewMode === 'kanban' && (
+        <div className="flex-shrink-0 flex items-center justify-center gap-2 py-2 border-t border-border bg-card/50">
+          <button
+            onClick={() => setZoomLevel((z) => Math.max(0, z - 1))}
+            disabled={zoomLevel === 0}
+            className="w-7 h-7 flex items-center justify-center rounded-md border border-border text-muted-foreground hover:text-foreground hover:bg-accent disabled:opacity-30 disabled:pointer-events-none transition-colors"
+            title="Show more departments (smaller columns)"
+          >
+            <Minus className="w-3.5 h-3.5" />
+          </button>
+          <span className="text-xs text-muted-foreground w-10 text-center tabular-nums">{Math.round(((zoomLevel + 1) / ZOOM_STEPS.length) * 100)}%</span>
+          <button
+            onClick={() => setZoomLevel((z) => Math.min(ZOOM_STEPS.length - 1, z + 1))}
+            disabled={zoomLevel === ZOOM_STEPS.length - 1}
+            className="w-7 h-7 flex items-center justify-center rounded-md border border-border text-muted-foreground hover:text-foreground hover:bg-accent disabled:opacity-30 disabled:pointer-events-none transition-colors"
+            title="Larger columns (easier to read)"
+          >
+            <Plus className="w-3.5 h-3.5" />
+          </button>
+        </div>
       )}
     </div>
   );
@@ -209,7 +243,7 @@ export default function ShopFloorPage() {
 
 // ─── Kanban Board (read-only) ──────────────────────────────────────────────────
 
-function KanbanBoard({ columns, big }: { columns: any[]; big?: boolean }) {
+function KanbanBoard({ columns, big, zoomLevel }: { columns: any[]; big?: boolean; zoomLevel: number }) {
   if (columns.length === 0) {
     return (
       <div className="flex-1 flex items-center justify-center">
@@ -218,18 +252,19 @@ function KanbanBoard({ columns, big }: { columns: any[]; big?: boolean }) {
     );
   }
   return (
-    <div className="flex-1 overflow-x-auto">
+    <div className="flex-1 overflow-x-auto overflow-y-hidden">
       <div className={cn('flex gap-3 p-4 h-full min-w-max', big && 'gap-4 p-6')}>
         {columns.map((column: any) => (
-          <KanbanColumn key={column.department.id} column={column} big={big} />
+          <KanbanColumn key={column.department.id} column={column} big={big} zoomLevel={zoomLevel} />
         ))}
       </div>
     </div>
   );
 }
 
-function KanbanColumn({ column, big }: { column: any; big?: boolean }) {
+function KanbanColumn({ column, big, zoomLevel }: { column: any; big?: boolean; zoomLevel: number }) {
   const { department, tasks, taskCount } = column;
+  const widthClass = big ? 'w-96' : ZOOM_STEPS[zoomLevel];
 
   const stations = new Map<string, any[]>();
   for (const task of tasks) {
@@ -239,7 +274,7 @@ function KanbanColumn({ column, big }: { column: any; big?: boolean }) {
   }
 
   return (
-    <div className={cn('flex flex-col flex-shrink-0', big ? 'w-96' : 'w-72')}>
+    <div className={cn('flex flex-col flex-shrink-0', widthClass)}>
       <div className="flex items-center justify-between mb-3 px-1">
         <div className="flex items-center gap-2">
           <div className={cn('rounded-full flex-shrink-0', big ? 'w-4 h-4' : 'w-2.5 h-2.5')} style={{ backgroundColor: department.color ?? '#6b7280' }} />
