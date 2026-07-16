@@ -58,8 +58,14 @@ export default function PurchasingDashboardPage() {
   }
 
   const createMutation = useMutation({
-    mutationFn: (payload: { unitId: string; partTypeId: string; isReceived: boolean; expectedArrivalDate?: string; receivedDate?: string }) =>
-      api.vendorParts.create(payload.unitId, payload),
+    mutationFn: (payload: { unitId: string; partTypeId: string; isReceived: boolean; expectedArrivalDate?: string; receivedDate?: string }) => {
+      // unitId belongs in the URL, not the body - the backend DTO
+      // doesn't declare it and the global ValidationPipe rejects any
+      // unexpected property outright (forbidNonWhitelisted: true),
+      // which is exactly why saving was silently failing.
+      const { unitId, ...body } = payload;
+      return api.vendorParts.create(unitId, body);
+    },
     onSuccess: (_data, variables) => {
       queryClient.invalidateQueries({ queryKey: ['vendor-parts', variables.unitId] });
       toast('Vendor part added', 'success');
@@ -69,8 +75,10 @@ export default function PurchasingDashboardPage() {
   });
 
   const updateMutation = useMutation({
-    mutationFn: (payload: { id: string; unitId: string; isReceived?: boolean; expectedArrivalDate?: string; receivedDate?: string }) =>
-      api.vendorParts.update(payload.id, payload),
+    mutationFn: (payload: { id: string; unitId: string; isReceived?: boolean; expectedArrivalDate?: string; receivedDate?: string }) => {
+      const { id, unitId, ...body } = payload;
+      return api.vendorParts.update(id, body);
+    },
     onSuccess: (_data, variables) => {
       queryClient.invalidateQueries({ queryKey: ['vendor-parts', variables.unitId] });
       toast('Updated', 'success');
