@@ -5,18 +5,25 @@ import Link from 'next/link';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { Badge, Button, Card, EmptyState, PageHeader, Spinner, toast } from '@/components/shared';
-import { Package, Rocket, X } from 'lucide-react';
+import { Package, Rocket, X, Search } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 const PART_DRAG_TYPE = 'application/x-hvacflow-parttype';
 
 export default function PlannerDashboardPage() {
   const queryClient = useQueryClient();
+  const [search, setSearch] = useState('');
   const { data: units = [], isLoading } = useQuery({
     queryKey: ['units', 'planner-queue'],
     queryFn: api.units.plannerQueue,
     refetchInterval: 20_000,
   });
+  const filteredUnits = search.trim()
+    ? units.filter((u: any) =>
+        u.serialNumber?.toLowerCase().includes(search.toLowerCase()) ||
+        u.displayName?.toLowerCase().includes(search.toLowerCase()),
+      )
+    : units;
   const { data: partTypes = [] } = useQuery({
     queryKey: ['part-types'],
     queryFn: () => api.partTypes.list({ isActive: true }),
@@ -99,61 +106,93 @@ export default function PlannerDashboardPage() {
           </div>
         </Card>
 
-        {/* Units awaiting planning */}
+        {/* Units */}
         {isLoading ? (
           <div className="flex items-center justify-center h-52"><Spinner className="w-7 h-7" /></div>
         ) : units.length === 0 ? (
-          <EmptyState title="Nothing to plan right now" description="Units show up here once Engineering releases them." />
+          <EmptyState title="No active units" />
         ) : (
-          <div className="space-y-4">
-            {units.map((unit: any) => (
-              <div
-                key={unit.id}
-                onDragOver={(e) => { e.preventDefault(); setDragOverUnitId(unit.id); }}
-                onDragLeave={() => setDragOverUnitId((current) => (current === unit.id ? null : current))}
-                onDrop={(e) => handleDrop(e, unit.id)}
-              >
-                <Card className={cn(
-                  'p-4 transition-all',
-                  dragOverUnitId === unit.id && 'ring-2 ring-primary bg-primary/5',
-                )}>
-                  <div className="flex items-center justify-between gap-3 mb-3">
-                    <div>
-                      <Link href={`/units/${unit.id}`} className="font-semibold hover:text-primary">{unit.serialNumber}</Link>
-                      <div className="text-xs text-muted-foreground">{unit.unitType?.name}{unit.dueDate ? ` · Ships ${new Date(unit.dueDate).toLocaleDateString()}` : ''}</div>
-                    </div>
-                    <Button
-                      size="sm"
-                      leftIcon={<Rocket className="w-3.5 h-3.5" />}
-                      disabled={(unit.parts?.length ?? 0) === 0}
-                      loading={releaseMutation.isPending && releaseMutation.variables === unit.id}
-                      onClick={() => releaseMutation.mutate(unit.id)}
-                    >
-                      Release to Production Manager
-                    </Button>
-                  </div>
+          <>
+            <div className="relative max-w-sm mb-4">
+              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground pointer-events-none" />
+              <input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search units by number or name…"
+                className="w-full h-9 pl-8 pr-7 rounded-md border border-border bg-secondary text-sm focus:outline-none focus:ring-1 focus:ring-primary/50"
+              />
+              {search && (
+                <button onClick={() => setSearch('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              )}
+            </div>
 
-                  <div className="rounded-lg border-2 border-dashed border-border p-3 min-h-[88px]">
-                    {(unit.parts?.length ?? 0) === 0 ? (
-                      <p className="text-xs text-muted-foreground text-center py-4">Drop a part type here to add it to this unit.</p>
-                    ) : (
-                      <div className="flex flex-wrap gap-2">
-                        {unit.parts.map((part: any) => (
-                          <span key={part.id} className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-secondary text-xs">
-                            <Package className="w-3 h-3 text-muted-foreground" />
-                            {part.partType?.name ?? part.identifier}
-                          </span>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                  {(unit.parts?.length ?? 0) === 0 && (
-                    <p className="text-[11px] text-muted-foreground mt-1.5">Add at least one part before releasing.</p>
-                  )}
-                </Card>
+            {filteredUnits.length === 0 ? (
+              <EmptyState title="No units match your search" />
+            ) : (
+              <div className="space-y-4">
+                {filteredUnits.map((unit: any) => {
+                  const releaseEligible = unit.engineeringStatus === 'ReleasedToManufacturing' && unit.productionReleaseStatus === 'AwaitingRelease';
+                  return (
+                    <div
+                      key={unit.id}
+                      onDragOver={(e) => { e.preventDefault(); setDragOverUnitId(unit.id); }}
+                      onDragLeave={() => setDragOverUnitId((current) => (current === unit.id ? null : current))}
+                      onDrop={(e) => handleDrop(e, unit.id)}
+                    >
+                      <Card className={cn(
+                        'p-4 transition-all',
+                        dragOverUnitId === unit.id && 'ring-2 ring-primary bg-primary/5',
+                      )}>
+                        <div className="flex items-center justify-between gap-3 mb-3">
+                          <div>
+                            <Link href={`/units/${unit.id}`} className="font-semibold hover:text-primary">{unit.serialNumber}</Link>
+                            <div className="text-xs text-muted-foreground">{unit.unitType?.name}{unit.dueDate ? ` · Ships ${new Date(unit.dueDate).toLocaleDateString()}` : ''}</div>
+                          </div>
+                          {releaseEligible ? (
+                            <Button
+                              size="sm"
+                              leftIcon={<Rocket className="w-3.5 h-3.5" />}
+                              disabled={(unit.parts?.length ?? 0) === 0}
+                              loading={releaseMutation.isPending && releaseMutation.variables === unit.id}
+                              onClick={() => releaseMutation.mutate(unit.id)}
+                            >
+                              Release to Production Manager
+                            </Button>
+                          ) : (
+                            <span title="Engineering hasn't released this unit yet - you can still add parts ahead of time.">
+                              <Badge variant="muted">
+                                {unit.engineeringStatus === 'ReleasedToManufacturing' ? 'Already planned' : 'Still in Engineering'}
+                              </Badge>
+                            </span>
+                          )}
+                        </div>
+
+                        <div className="rounded-lg border-2 border-dashed border-border p-3 min-h-[88px]">
+                          {(unit.parts?.length ?? 0) === 0 ? (
+                            <p className="text-xs text-muted-foreground text-center py-4">Drop a part type here to add it to this unit.</p>
+                          ) : (
+                            <div className="flex flex-wrap gap-2">
+                              {unit.parts.map((part: any) => (
+                                <span key={part.id} className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-secondary text-xs">
+                                  <Package className="w-3 h-3 text-muted-foreground" />
+                                  {part.partType?.name ?? part.identifier}
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                        {releaseEligible && (unit.parts?.length ?? 0) === 0 && (
+                          <p className="text-[11px] text-muted-foreground mt-1.5">Add at least one part before releasing.</p>
+                        )}
+                      </Card>
+                    </div>
+                  );
+                })}
               </div>
-            ))}
-          </div>
+            )}
+          </>
         )}
       </div>
     </div>

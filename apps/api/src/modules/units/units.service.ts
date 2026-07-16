@@ -310,12 +310,19 @@ export class UnitsService {
   // Planned yet. This is the "assign parts" stage that sits between
   // Engineering's release and the Production Manager's release-to-
   // Fabrication step.
+  // Planner needs to see every active unit, not just the narrow subset
+  // that's already past Engineering and waiting to be planned - they
+  // need to work ahead, assigning parts to units that haven't even
+  // finished Engineering yet. The "Release to Production Manager"
+  // action itself still only makes sense (and is still validated
+  // server-side in markPlanned()) once Engineering has actually
+  // released the unit - the frontend shows that distinction rather
+  // than hiding not-yet-eligible units entirely.
   async plannerQueue() {
     return this.prisma.unit.findMany({
       where: {
         deletedAt: null,
-        engineeringStatus: EngineeringStatus.ReleasedToManufacturing,
-        productionReleaseStatus: ProductionReleaseStatus.AwaitingRelease,
+        status: { notIn: [UnitStatus.Completed, UnitStatus.Dispatched] },
       },
       include: { ...this.unitSummaryInclude(), parts: { where: { deletedAt: null }, include: { partType: true } } },
       orderBy: [{ dueDate: 'asc' }, { priorityPosition: 'asc' }],
