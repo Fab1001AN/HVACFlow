@@ -85,6 +85,28 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     }
   }, [isAuthenticated, user, router, loadMe]);
 
+  const canManageConfig = hasPermission('config:manage');
+
+  // Admins get a shortcut to every department's live Mission Control
+  // board, in department sortOrder - not a separate page per department
+  // (that duplicated a lot of UI before), just Mission Control
+  // pre-filtered via query param.
+  //
+  // This MUST be called unconditionally, before the early return below -
+  // a hook called only after an early-return guard gets skipped entirely
+  // on renders where that guard fires (e.g. while auth is still
+  // loading), then gets called on renders where it doesn't. That changes
+  // the number/order of hooks between renders, which is exactly what
+  // React's "Rendered more hooks than during the previous render" error
+  // is about - it was placed after the guard before, which is what
+  // caused it.
+  const { data: departmentLinks = [] } = useQuery({
+    queryKey: ['departments'],
+    queryFn: () => api.departments.list({ isActive: true }),
+    enabled: canManageConfig,
+    staleTime: 60_000,
+  });
+
   if (!isAuthenticated || !user) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
@@ -93,20 +115,8 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     );
   }
 
-  const canManageConfig = hasPermission('config:manage');
   const isConfigActive = pathname.startsWith('/config');
   const visibleNavItems = navItems.filter((item: any) => !item.permission || hasPermission(item.permission));
-
-  // Admins get a shortcut to every department's live Mission Control
-  // board, in department sortOrder - not a separate page per department
-  // (that duplicated a lot of UI before), just Mission Control
-  // pre-filtered via query param.
-  const { data: departmentLinks = [] } = useQuery({
-    queryKey: ['departments'],
-    queryFn: () => api.departments.list({ isActive: true }),
-    enabled: canManageConfig,
-    staleTime: 60_000,
-  });
 
   return (
     <div className="flex h-screen bg-background overflow-hidden">
