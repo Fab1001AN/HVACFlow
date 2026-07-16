@@ -10,7 +10,7 @@ import 'dotenv/config';
  * No values here are hardcoded in application logic.
  */
 
-import { PrismaClient, AppliesTo, RouteTargetType } from '@prisma/client';
+import { PrismaClient, AppliesTo, RouteTargetType, PartSourceType } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 
 const prisma = new PrismaClient();
@@ -41,6 +41,7 @@ async function main() {
     { code: 'unit:view', category: 'Units', description: 'View units' },
     { code: 'unit:manage', category: 'Units', description: 'Create and edit units' },
     { code: 'unit:plan', category: 'Units', description: 'Assign parts to a unit and release it to the Production Manager' },
+    { code: 'vendor-part:manage', category: 'Units', description: 'Track vendor-supplied parts on a unit (received status, arrival dates)' },
     { code: 'part:view', category: 'Parts', description: 'View parts' },
     { code: 'part:manage', category: 'Parts', description: 'Create and edit parts' },
     // Configuration
@@ -125,6 +126,15 @@ async function main() {
     create: { name: 'Planner', description: 'Assigns parts to engineering-released units before handing off to the Production Manager', isSystem: true },
   });
 
+  // Purchasing tracks vendor-supplied parts (coils, motors, fans bought
+  // from a supplier) against units. If the Purchasing department is
+  // toggled off, Assembly takes over this responsibility directly.
+  const purchasingRole = await prisma.role.upsert({
+    where: { name: 'Purchasing' },
+    update: {},
+    create: { name: 'Purchasing', description: 'Tracks vendor-supplied parts and their arrival/receipt status against units', isSystem: true },
+  });
+
   // Admin gets all permissions
   const allPermIds = Object.values(permissions);
   await prisma.rolePermission.deleteMany({ where: { roleId: adminRole.id } });
@@ -137,7 +147,7 @@ async function main() {
     'task:view', 'task:view-all', 'task:start', 'task:complete', 'task:verify',
     'task:hold', 'task:reject', 'task:reassign',
     'customer:view', 'project:view', 'order:view', 'order:manage',
-    'unit:view', 'unit:manage', 'part:view', 'part:manage',
+    'unit:view', 'unit:manage', 'part:view', 'part:manage', 'vendor-part:manage',
     'user:view', 'role:view', 'report:view', 'dashboard:configure',
     'department:view', 'process:view', 'machine:view',
   ];
@@ -196,13 +206,25 @@ async function main() {
   // build out their parts (which needs process/part-type visibility to
   // pick from), then release to the Production Manager.
   const plannerPerms = [
-    'unit:view', 'unit:plan', 'part:view', 'part:manage',
+    'unit:view', 'unit:plan', 'part:view', 'part:manage', 'vendor-part:manage',
     'department:view', 'process:view', 'dashboard:configure',
   ];
   await prisma.rolePermission.deleteMany({ where: { roleId: plannerRole.id } });
   await prisma.rolePermission.createMany({
     data: plannerPerms.map((code) => ({
       roleId: plannerRole.id,
+      permissionId: permissions[code],
+    })),
+  });
+
+  // Purchasing permissions
+  const purchasingPerms = [
+    'unit:view', 'vendor-part:manage', 'department:view', 'dashboard:configure',
+  ];
+  await prisma.rolePermission.deleteMany({ where: { roleId: purchasingRole.id } });
+  await prisma.rolePermission.createMany({
+    data: purchasingPerms.map((code) => ({
+      roleId: purchasingRole.id,
       permissionId: permissions[code],
     })),
   });
@@ -233,6 +255,7 @@ async function main() {
   const departmentData = [
     { name: 'Engineering', code: 'ENG', color: '#0ea5e9', sortOrder: 1 },
     { name: 'Fabrication', code: 'FAB', color: '#6366f1', sortOrder: 3 },
+    { name: 'Purchasing', code: 'PURCH', color: '#f59e0b', sortOrder: 4 },
     { name: 'Assembly', code: 'ASSY', color: '#10b981', sortOrder: 5 },
     { name: 'Electrical', code: 'ELEC', color: '#8b5cf6', sortOrder: 6 },
     { name: 'Piping', code: 'PIPE', color: '#06b6d4', sortOrder: 7 },
@@ -320,8 +343,28 @@ async function main() {
     { name: 'Drain Pan', code: 'DRAIN' },
   ];
 
+  // Vendor-supplied parts (bought from a supplier, not built in-house) -
+  // no process routing, just tracked as received/pending with dates via
+  // VendorPart. Dragged onto a unit from the Purchasing Dashboard (or
+  // added directly by Assembly if Purchasing is toggled off).
+  const vendorPartTypeData: { name: string; code: string; sourceType: PartSourceType }[] = [
+    { name: 'HX Coil', code: 'HXCOIL', sourceType: PartSourceType.Vendor },
+    { name: 'DX Coil', code: 'DXCOIL', sourceType: PartSourceType.Vendor },
+    { name: 'Fan', code: 'VFAN', sourceType: PartSourceType.Vendor },
+    { name: 'Motor', code: 'MOTOR', sourceType: PartSourceType.Vendor },
+    { name: 'Heat Exchanger', code: 'HTEXCH', sourceType: PartSourceType.Vendor },
+  ];
+
   const partTypes: Record<string, string> = {};
   for (const pt of partTypeData) {
+    const created = await prisma.partType.upsert({
+      where: { code: pt.code },
+      update: pt,
+      create: pt,
+    });
+    partTypes[pt.code] = created.id;
+  }
+  for (const pt of vendorPartTypeData) {
     const created = await prisma.partType.upsert({
       where: { code: pt.code },
       update: pt,

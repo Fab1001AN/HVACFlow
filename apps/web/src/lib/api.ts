@@ -246,7 +246,7 @@ export const api = {
   },
 
   partTypes: {
-    list: (params?: { isActive?: boolean }) => api.get<any[]>('/part-types', { params }),
+    list: (params?: { isActive?: boolean; sourceType?: 'Fabricated' | 'Vendor' }) => api.get<any[]>('/part-types', { params }),
     get: (id: string) => api.get<any>(`/part-types/${id}`),
     create: (body: any) => api.post<any>('/part-types', body),
     update: (id: string, body: any) => api.patch<any>(`/part-types/${id}`, body),
@@ -311,7 +311,9 @@ export const api = {
     managerSummary: () => api.get<any>('/units/manager-summary'),
     engineeringQueue: () => api.get<any[]>('/units/engineering-queue'),
     plannerQueue: () => api.get<any[]>('/units/planner-queue'),
+    assemblySummary: () => api.get<{ wip: any[]; upcoming: any[] }>('/units/assembly-summary'),
     markPlanned: (id: string) => api.post<any>(`/units/${id}/mark-planned`, {}),
+    startAssembly: (id: string, teamName: string) => api.post<any>(`/units/${id}/start-assembly`, { teamName }),
     listByOrder: (orderId: string, params?: any) =>
       api.get<any>(`/orders/${orderId}/units`, { params }),
     get: (id: string) => api.get<any>(`/units/${id}`),
@@ -337,6 +339,15 @@ export const api = {
       api.post<any>(`/units/${unitId}/parts`, body),
     update: (id: string, body: any) => api.patch<any>(`/parts/${id}`, body),
     replaceRoute: (id: string, processDefinitionIds: string[], reason: string) => api.patch<any>(`/parts/${id}/route`, { processDefinitionIds, reason }),
+  },
+
+  vendorParts: {
+    listByUnit: (unitId: string) => api.get<any[]>(`/units/${unitId}/vendor-parts`),
+    create: (unitId: string, body: { partTypeId: string; isReceived: boolean; expectedArrivalDate?: string; receivedDate?: string }) =>
+      api.post<any>(`/units/${unitId}/vendor-parts`, body),
+    update: (id: string, body: { isReceived?: boolean; expectedArrivalDate?: string; receivedDate?: string }) =>
+      api.patch<any>(`/vendor-parts/${id}`, body),
+    delete: (id: string) => api.delete(`/vendor-parts/${id}`),
   },
 
   // ─── Production Tasks ────────────────────────────────────────────────────

@@ -9,8 +9,9 @@ import {
   Body, Param, Query, ParseBoolPipe, Module,
 } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
-import { IsString, IsOptional, IsBoolean, IsInt, IsUUID, Min, MaxLength } from 'class-validator';
+import { IsString, IsOptional, IsBoolean, IsInt, IsUUID, IsEnum, Min, MaxLength } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { PartSourceType } from '@prisma/client';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { RequirePermissions } from '../common/decorators/require-permissions.decorator';
 
@@ -19,11 +20,15 @@ import { RequirePermissions } from '../common/decorators/require-permissions.dec
 class CatalogTypeDto {
   @ApiProperty() @IsString() @MaxLength(255) name: string;
   @ApiProperty() @IsString() @MaxLength(50) code: string;
+  // Only meaningful for PartType - ignored by UnitTypesService/
+  // MachinesService, which never read this field off the DTO.
+  @ApiPropertyOptional({ enum: PartSourceType }) @IsOptional() @IsEnum(PartSourceType) sourceType?: PartSourceType;
 }
 class UpdateTypeDto {
   @IsOptional() @IsString() name?: string;
   @IsOptional() @IsString() code?: string;
   @IsOptional() @IsBoolean() isActive?: boolean;
+  @IsOptional() @IsEnum(PartSourceType) sourceType?: PartSourceType;
 }
 class CreateCompositionDto {
   @ApiProperty() @IsUUID() partTypeId: string;
@@ -80,8 +85,14 @@ export class UnitTypesService {
 @Injectable()
 export class PartTypesService {
   constructor(private readonly prisma: PrismaService) {}
-  findAll(isActive?: boolean) {
-    return this.prisma.partType.findMany({ where: isActive !== undefined ? { isActive } : undefined, orderBy: { name: 'asc' } });
+  findAll(isActive?: boolean, sourceType?: PartSourceType) {
+    return this.prisma.partType.findMany({
+      where: {
+        ...(isActive !== undefined ? { isActive } : {}),
+        ...(sourceType ? { sourceType } : {}),
+      },
+      orderBy: { name: 'asc' },
+    });
   }
   async findOne(id: string) {
     const pt = await this.prisma.partType.findUnique({
@@ -185,7 +196,10 @@ export class UnitTypesController {
 export class PartTypesController {
   constructor(private readonly service: PartTypesService) {}
   @Get()
-  findAll(@Query('isActive', new ParseBoolPipe({ optional: true })) isActive?: boolean) { return this.service.findAll(isActive); }
+  findAll(
+    @Query('isActive', new ParseBoolPipe({ optional: true })) isActive?: boolean,
+    @Query('sourceType') sourceType?: PartSourceType,
+  ) { return this.service.findAll(isActive, sourceType); }
   @Get(':id')
   findOne(@Param('id') id: string) { return this.service.findOne(id); }
   @Post() @RequirePermissions('config:manage')

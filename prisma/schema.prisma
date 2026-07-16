@@ -102,6 +102,7 @@ model User {
   createdUnits            Unit[]
   createdParts            Part[]
   unitComments            UnitComment[]
+  vendorParts             VendorPart[]
 
   @@map("users")
 }
@@ -257,15 +258,22 @@ model UnitType {
   @@map("unit_types")
 }
 
+enum PartSourceType {
+  Fabricated
+  Vendor
+}
+
 model PartType {
-  id       String  @id @default(uuid())
-  name     String
-  code     String  @unique
-  isActive Boolean @default(true)
+  id         String         @id @default(uuid())
+  name       String
+  code       String         @unique
+  isActive   Boolean        @default(true)
+  sourceType PartSourceType @default(Fabricated)
 
   parts         Part[]
   processRoutes ProcessRoute[]
   compositions  UnitTypeComposition[]
+  vendorParts   VendorPart[]
 
   @@map("part_types")
 }
@@ -308,6 +316,8 @@ model Unit {
   releasedAt               DateTime?
   releasedByUserId         String?
   manufacturingStartedAt   DateTime?
+  assignedTeamName         String? // captured when Assembly clicks "Start Building Unit"
+  assemblyStartedAt        DateTime?
   isBlocked                Boolean    @default(false)
   holdReason               String?
   oneDriveFolderUrl        String?
@@ -331,6 +341,7 @@ model Unit {
   parts             Part[]
   tasks             ProductionTask[] @relation("UnitTasks")
   comments          UnitComment[]
+  vendorParts       VendorPart[]
 
   @@index([orderId])
   @@index([priorityLevelId])
@@ -357,6 +368,31 @@ model UnitComment {
 
   @@index([unitId, createdAt])
   @@map("unit_comments")
+}
+
+// Vendor-supplied parts (HX coils, compressors, motors, etc.) tracked
+// separately from fabricated Parts - they don't get routed through
+// process/task workflow at all, just a received/pending status and
+// dates. Added either by a Purchasing user (drag-drop from the vendor
+// part-type palette) or by Assembly directly if the Purchasing
+// department is toggled off.
+model VendorPart {
+  id                  String    @id @default(uuid())
+  unitId              String
+  partTypeId          String
+  isReceived          Boolean   @default(false)
+  expectedArrivalDate DateTime?
+  receivedDate        DateTime?
+  addedByUserId       String
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  unit          Unit     @relation(fields: [unitId], references: [id], onDelete: Cascade)
+  partType      PartType @relation(fields: [partTypeId], references: [id])
+  addedByUser   User     @relation(fields: [addedByUserId], references: [id])
+
+  @@index([unitId])
+  @@map("vendor_parts")
 }
 
 model Part {
