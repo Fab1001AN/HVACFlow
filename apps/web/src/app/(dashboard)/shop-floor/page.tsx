@@ -8,7 +8,6 @@ import { useAuthStore } from '@/store/auth.store';
 import { TaskStatus } from '@hvacflow/shared-types';
 import { cn, STATUS_BG, STATUS_LABELS } from '@/lib/utils';
 import { TaskCard } from '@/features/mission-control/task-card';
-import { TaskDrawer } from '@/features/tasks/task-drawer';
 import { Spinner, EmptyState, Avatar } from '@/components/shared';
 import { useWsEvent } from '@/lib/websocket';
 import { LayoutGrid, List, Filter, RefreshCw, Maximize, Minimize } from 'lucide-react';
@@ -25,7 +24,6 @@ function ShopFloorBoard() {
   const { hasPermission } = useAuthStore();
   const queryClient = useQueryClient();
   const searchParams = useSearchParams();
-  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>('kanban');
   const [tvMode, setTvMode] = useState(false);
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -193,12 +191,10 @@ function ShopFloorBoard() {
       {isLoading ? (
         <div className="flex-1 flex items-center justify-center"><Spinner className="w-8 h-8" /></div>
       ) : viewMode === 'kanban' || tvMode ? (
-        <KanbanBoard columns={board?.columns ?? []} onTaskClick={setSelectedTaskId} big={tvMode} />
+        <KanbanBoard columns={board?.columns ?? []} big={tvMode} />
       ) : (
-        <TaskListView columns={board?.columns ?? []} onTaskClick={setSelectedTaskId} />
+        <TaskListView columns={board?.columns ?? []} />
       )}
-
-      {!tvMode && <TaskDrawer taskId={selectedTaskId} onClose={() => setSelectedTaskId(null)} />}
     </div>
   );
 }
@@ -213,7 +209,7 @@ export default function ShopFloorPage() {
 
 // ─── Kanban Board (read-only) ──────────────────────────────────────────────────
 
-function KanbanBoard({ columns, onTaskClick, big }: { columns: any[]; onTaskClick: (id: string) => void; big?: boolean }) {
+function KanbanBoard({ columns, big }: { columns: any[]; big?: boolean }) {
   if (columns.length === 0) {
     return (
       <div className="flex-1 flex items-center justify-center">
@@ -225,14 +221,14 @@ function KanbanBoard({ columns, onTaskClick, big }: { columns: any[]; onTaskClic
     <div className="flex-1 overflow-x-auto">
       <div className={cn('flex gap-3 p-4 h-full min-w-max', big && 'gap-4 p-6')}>
         {columns.map((column: any) => (
-          <KanbanColumn key={column.department.id} column={column} onTaskClick={onTaskClick} big={big} />
+          <KanbanColumn key={column.department.id} column={column} big={big} />
         ))}
       </div>
     </div>
   );
 }
 
-function KanbanColumn({ column, onTaskClick, big }: { column: any; onTaskClick: (id: string) => void; big?: boolean }) {
+function KanbanColumn({ column, big }: { column: any; big?: boolean }) {
   const { department, tasks, taskCount } = column;
 
   const stations = new Map<string, any[]>();
@@ -265,7 +261,7 @@ function KanbanColumn({ column, onTaskClick, big }: { column: any; onTaskClick: 
               </div>
               <div className="space-y-2">
                 {stationTasks.map((task: any) => (
-                  <TaskCard key={task.id} task={task} onClick={() => onTaskClick(task.id)} />
+                  <TaskCard key={task.id} task={task} />
                 ))}
               </div>
             </div>
@@ -278,7 +274,7 @@ function KanbanColumn({ column, onTaskClick, big }: { column: any; onTaskClick: 
 
 // ─── List View ────────────────────────────────────────────────────────────────
 
-function TaskListView({ columns, onTaskClick }: { columns: any[]; onTaskClick: (id: string) => void }) {
+function TaskListView({ columns }: { columns: any[] }) {
   const allTasks = columns.flatMap((c: any) => c.tasks.map((t: any) => ({ ...t, _deptColor: c.department.color })));
 
   if (allTasks.length === 0) {
@@ -303,7 +299,7 @@ function TaskListView({ columns, onTaskClick }: { columns: any[]; onTaskClick: (
         </thead>
         <tbody className="divide-y divide-border">
           {allTasks.map((task: any) => (
-            <tr key={task.id} onClick={() => onTaskClick(task.id)} className="hover:bg-accent cursor-pointer transition-colors">
+            <tr key={task.id} className="transition-colors">
               <td className="px-4 py-3">
                 <div className="flex items-center gap-2">
                   <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: task._deptColor ?? '#6b7280' }} />

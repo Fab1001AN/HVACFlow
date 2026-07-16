@@ -1,8 +1,10 @@
 'use client';
+import { useState } from 'react';
 import Link from 'next/link';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { Badge, Button, Card, EmptyState, PageHeader, ProgressBar, Spinner, toast } from '@/components/shared';
+import { TaskDrawer } from '@/features/tasks/task-drawer';
 import { AlertTriangle } from 'lucide-react';
 import { format } from 'date-fns';
 
@@ -15,12 +17,31 @@ function parseMonthSafe(isoString: string): Date {
   return new Date(year, month - 1, 1);
 }
 
-function DepartmentProgress({ departments = [] }: { departments?: any[] }) {
+function DepartmentProgress({ departments = [], onTaskClick }: { departments?: any[]; onTaskClick: (taskId: string) => void }) {
   if (!departments.length) return <div className="mt-3 text-xs text-muted-foreground">No routed parts yet.</div>;
   return <div className="mt-3 space-y-2">{departments.map((department) => <div key={department.id} className="rounded-md border bg-secondary/20 p-2">
     <div className="flex items-center justify-between gap-2"><span className="text-xs font-semibold">{department.name}</span><span className="text-[11px] text-muted-foreground">{department.parts.length} item(s)</span></div>
     <div className="mt-1 flex flex-wrap gap-1 text-[10px]"><Badge variant="muted">Ready {department.ready}</Badge><Badge variant="outline">Active {department.inProgress}</Badge><Badge variant="outline">Done {department.completed}</Badge>{department.waiting > 0 && <Badge variant="muted">Waiting {department.waiting}</Badge>}</div>
-    <div className="mt-2 space-y-1">{department.parts.slice(0, 6).map((part: any) => <div key={part.id} className="flex justify-between gap-2 text-[11px]"><span className="truncate">{part.partType?.name ?? part.identifier}</span><span className="text-muted-foreground whitespace-nowrap">{part.process} · {part.status}</span></div>)}{department.parts.length > 6 && <div className="text-[10px] text-muted-foreground">+{department.parts.length - 6} more</div>}</div>
+    <div className="mt-2 space-y-1">
+      {department.parts.slice(0, 6).map((part: any) => (
+        <button
+          key={part.id}
+          onClick={() => onTaskClick(part.taskId)}
+          className="w-full flex flex-col gap-0.5 text-left px-1 py-0.5 -mx-1 rounded hover:bg-accent/60 transition-colors"
+        >
+          <div className="flex justify-between gap-2 text-[11px]">
+            <span className="truncate">{part.partType?.name ?? part.identifier}</span>
+            <span className="text-muted-foreground whitespace-nowrap">{part.process} · {part.status}</span>
+          </div>
+          {part.status === 'Completed' && part.completedByName && (
+            <span className="text-[10px] text-emerald-600">
+              ✓ {part.completedByName} · {part.completedAt ? format(new Date(part.completedAt), 'MMM d, h:mm a') : ''}
+            </span>
+          )}
+        </button>
+      ))}
+      {department.parts.length > 6 && <div className="text-[10px] text-muted-foreground">+{department.parts.length - 6} more</div>}
+    </div>
   </div>)}</div>;
 }
 
@@ -40,6 +61,7 @@ function currentProcesses(unit: any): string[] {
 
 export default function ManagerDashboard() {
   const qc = useQueryClient();
+  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const { data, isLoading } = useQuery({ queryKey: ['manager-summary'], queryFn: api.units.managerSummary, refetchInterval: 15000 });
   const release = useMutation({ mutationFn: (id: string) => api.units.release(id), onSuccess: () => { qc.invalidateQueries({ queryKey: ['manager-summary'] }); toast('Unit released directly to Fabrication', 'success'); }, onError: (e: any) => toast(e.message, 'error') });
   const groups = [{ title: 'Awaiting Production Release', units: data?.awaitingRelease ?? [], action: true }, { title: 'Released — Waiting for Fabrication', units: data?.released ?? [] }, { title: 'In Production by Department', units: data?.started ?? [] }];
@@ -63,7 +85,7 @@ export default function ManagerDashboard() {
         <span className="text-[11px] text-muted-foreground tabular-nums">{Math.round(Number(u.progressPercentage))}%</span>
       </div>
       {g.action && <Button className="mt-3 w-full" size="sm" disabled={u.engineeringStatus !== 'ReleasedToManufacturing' || u.isBlocked} loading={release.isPending && release.variables === u.id} onClick={() => release.mutate(u.id)}>Release Entire Unit to Fabrication</Button>}
-      <DepartmentProgress departments={u.departmentProgress} />
+      <DepartmentProgress departments={u.departmentProgress} onTaskClick={setSelectedTaskId} />
     </div>;
-  })}</div></Card>)}</div>}</div>;
+  })}</div></Card>)}</div>}<TaskDrawer taskId={selectedTaskId} onClose={() => setSelectedTaskId(null)} /></div>;
 }

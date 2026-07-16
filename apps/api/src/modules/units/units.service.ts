@@ -187,7 +187,7 @@ export class UnitsService {
           include: {
             partType: true,
             tasks: {
-              include: { department: true, processDefinition: true },
+              include: { department: true, processDefinition: true, updatedBy: { select: { id: true, name: true } } },
               orderBy: { sequenceOrder: 'asc' },
             },
           },
@@ -197,7 +197,7 @@ export class UnitsService {
     });
 
     const enriched = units.map((unit) => {
-      const departmentMap = new Map<string, { id: string; name: string; ready: number; inProgress: number; completed: number; waiting: number; parts: Array<{ id: string; identifier: string; partType: unknown; quantity: number; process: string; status: string }> }>();
+      const departmentMap = new Map<string, { id: string; name: string; ready: number; inProgress: number; completed: number; waiting: number; parts: Array<{ id: string; taskId: string; identifier: string; partType: unknown; quantity: number; process: string; status: string; completedAt: Date | null; completedByName: string | null }> }>();
       for (const part of unit.parts) {
         const visibleTask = part.tasks.find((task) => ['Ready', 'InProgress', 'PendingVerification', 'OnHold'].includes(task.status))
           ?? [...part.tasks].reverse().find((task) => task.status === 'Completed')
@@ -209,7 +209,21 @@ export class UnitsService {
         else if (['InProgress', 'PendingVerification', 'OnHold'].includes(visibleTask.status)) entry.inProgress += 1;
         else if (visibleTask.status === 'Completed') entry.completed += 1;
         else entry.waiting += 1;
-        entry.parts.push({ id: part.id, identifier: part.identifier, partType: part.partType, quantity: part.quantity, process: visibleTask.processDefinition.name, status: visibleTask.status });
+        entry.parts.push({
+          id: part.id,
+          taskId: visibleTask.id,
+          identifier: part.identifier,
+          partType: part.partType,
+          quantity: part.quantity,
+          process: visibleTask.processDefinition.name,
+          status: visibleTask.status,
+          // Who confirmed this step and when - updatedBy reflects
+          // whoever last touched the task, which for a Completed task is
+          // exactly whoever clicked Task Completed (set in
+          // ProductionTasksService.complete()).
+          completedAt: visibleTask.status === 'Completed' ? visibleTask.completedAt : null,
+          completedByName: visibleTask.status === 'Completed' ? (visibleTask.updatedBy?.name ?? null) : null,
+        });
         departmentMap.set(department.id, entry);
       }
       return { ...unit, departmentProgress: [...departmentMap.values()] };

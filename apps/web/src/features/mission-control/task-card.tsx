@@ -8,7 +8,7 @@ import { Clock, Check } from 'lucide-react';
 
 interface TaskCardProps {
   task: any;
-  onClick: () => void;
+  onClick?: () => void;
   onComplete?: (taskId: string) => void;
   completing?: boolean;
 }
@@ -27,6 +27,7 @@ export function TaskCard({ task, onClick, onComplete, completing }: TaskCardProp
       onClick={onClick}
       className={cn(
         'task-card group select-none',
+        !onClick && 'cursor-default hover:border-border hover:bg-card hover:shadow-none',
         isOnHold && 'opacity-60',
         isPendingVerification && 'border-orange-500/40',
       )}

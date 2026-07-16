@@ -168,7 +168,6 @@ export default function SupervisorDashboardPage() {
                             <TaskCard
                               key={task.id}
                               task={task}
-                              onClick={() => setSelectedTaskId(task.id)}
                               onComplete={(taskId) => completeMutation.mutate(taskId)}
                               completing={completeMutation.isPending && completeMutation.variables === task.id}
                             />
