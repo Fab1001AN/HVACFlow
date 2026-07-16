@@ -103,6 +103,7 @@ model User {
   createdParts            Part[]
   unitComments            UnitComment[]
   vendorParts             VendorPart[]
+  activityLogs            ActivityLog[]
 
   @@map("users")
 }
@@ -342,6 +343,7 @@ model Unit {
   tasks             ProductionTask[] @relation("UnitTasks")
   comments          UnitComment[]
   vendorParts       VendorPart[]
+  activityLogs      ActivityLog[]
 
   @@index([orderId])
   @@index([priorityLevelId])
@@ -353,6 +355,43 @@ model Unit {
   @@index([dueDate])
   @@index([status])
   @@map("units")
+}
+
+// Unified, unit-level "what happened and when" timeline - the single
+// source of truth an audit trail needs, instead of scattered signals
+// (task.completedAt, unit comments, etc.) that each only tell part of
+// the story. Every meaningful business event on a unit gets one entry
+// here, in plain language, so a manager or director can see the whole
+// history of a unit in one place without cross-referencing five pages.
+enum ActivityAction {
+  UnitCreated
+  EngineeringAdvanced
+  UnitPlanned
+  UnitReleasedToProduction
+  ManufacturingStarted
+  AssemblyStarted
+  TaskCompleted
+  DelayReported
+  VendorPartReceived
+  VendorPartLogged
+  UnitBlocked
+  UnitUnblocked
+}
+
+model ActivityLog {
+  id          String         @id @default(uuid())
+  unitId      String
+  userId      String?
+  action      ActivityAction
+  description String
+  metadata    Json?
+  createdAt   DateTime       @default(now())
+
+  unit Unit  @relation(fields: [unitId], references: [id], onDelete: Cascade)
+  user User? @relation(fields: [userId], references: [id])
+
+  @@index([unitId, createdAt])
+  @@map("activity_logs")
 }
 
 model UnitComment {

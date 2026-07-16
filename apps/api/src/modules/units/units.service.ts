@@ -1,10 +1,11 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
-import { EngineeringStatus, Prisma, ProductionReleaseStatus, ProductionTask, UnitStatus } from '@prisma/client';
+import { EngineeringStatus, Prisma, ProductionReleaseStatus, ProductionTask, UnitStatus, ActivityAction } from '@prisma/client';
 import { IsBoolean, IsDateString, IsInt, IsObject, IsOptional, IsString, IsUUID, IsUrl, Matches, Min } from 'class-validator';
 import { TaskStatus } from '@hvacflow/shared-types';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { WorkflowProgressService } from '../workflow-progress/workflow-progress.service';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
+import { ActivityLogService } from '../activity-log/activity-log.module';
 
 export class CreateUnitDto {
   @IsUUID() unitTypeId: string;
@@ -65,6 +66,7 @@ export class UnitsService {
     private readonly prisma: PrismaService,
     private readonly workflowProgress: WorkflowProgressService,
     private readonly realtime: RealtimeGateway,
+    private readonly activityLog: ActivityLogService,
   ) {}
 
   private monthValue(value?: string) {
@@ -281,6 +283,12 @@ export class UnitsService {
       for (const comp of composition.filter((c) => !c.isOptional)) await this.createPartWithTasks(tx, newUnit.id, comp.partTypeId, comp.defaultQuantity, priority.id, userId);
       return newUnit;
     });
+    await this.activityLog.log({
+      unitId: unit.id,
+      userId,
+      action: ActivityAction.UnitCreated,
+      description: `Unit ${unit.serialNumber} created`,
+    });
     return this.findOne(unit.id);
   }
 
@@ -298,12 +306,19 @@ export class UnitsService {
     return this.prisma.unit.update({ where: { id }, data: { productionMonth: this.monthValue(dto.productionMonth), priorityPosition: dto.priorityPosition }, include: this.unitSummaryInclude() });
   }
 
-  async advanceEngineering(id: string) {
+  async advanceEngineering(id: string, userId: string) {
     const unit = await this.findOne(id);
     const currentIndex = ENGINEERING_SEQUENCE.indexOf(unit.engineeringStatus);
     if (currentIndex < 0 || currentIndex === ENGINEERING_SEQUENCE.length - 1) throw new ConflictException('Engineering workflow is already complete');
     const next = ENGINEERING_SEQUENCE[currentIndex + 1];
-    return this.prisma.unit.update({ where: { id }, data: { engineeringStatus: next, currentStage: next === EngineeringStatus.ReleasedToManufacturing ? 'Awaiting production release' : 'Detailing' }, include: this.unitSummaryInclude() });
+    const updated = await this.prisma.unit.update({ where: { id }, data: { engineeringStatus: next, currentStage: next === EngineeringStatus.ReleasedToManufacturing ? 'Awaiting production release' : 'Detailing' }, include: this.unitSummaryInclude() });
+    await this.activityLog.log({
+      unitId: id,
+      userId,
+      action: ActivityAction.EngineeringAdvanced,
+      description: `Engineering stage advanced to ${next}`,
+    });
+    return updated;
   }
 
   // Planner's queue: engineering-released units that haven't been marked
@@ -359,17 +374,24 @@ export class UnitsService {
     return { wip, upcoming };
   }
 
-  async markPlanned(id: string) {
+  async markPlanned(id: string, userId: string) {
     const unit = await this.prisma.unit.findUnique({ where: { id }, include: { parts: { where: { deletedAt: null } } } });
     if (!unit) throw new NotFoundException('Unit not found');
     if (unit.engineeringStatus !== EngineeringStatus.ReleasedToManufacturing) throw new ConflictException('Engineering must release this unit before it can be planned');
     if (unit.productionReleaseStatus !== ProductionReleaseStatus.AwaitingRelease) throw new ConflictException('Unit is already planned or released');
     if (unit.parts.length === 0) throw new ConflictException('Add at least one part before releasing to the Production Manager');
-    return this.prisma.unit.update({
+    const updated = await this.prisma.unit.update({
       where: { id },
       data: { productionReleaseStatus: ProductionReleaseStatus.Planned },
       include: this.unitSummaryInclude(),
     });
+    await this.activityLog.log({
+      unitId: id,
+      userId,
+      action: ActivityAction.UnitPlanned,
+      description: `Parts assigned (${unit.parts.length}) and released to the Production Manager`,
+    });
+    return updated;
   }
 
   async releaseToProduction(id: string, userId: string) {
@@ -381,7 +403,7 @@ export class UnitsService {
       where: { isActive: true, OR: [{ code: { equals: 'FAB', mode: 'insensitive' } }, { name: { equals: 'Fabrication', mode: 'insensitive' } }] },
     });
     if (!fabrication) throw new ConflictException('Create an active Fabrication department before releasing units');
-    return this.prisma.unit.update({
+    const updated = await this.prisma.unit.update({
       where: { id },
       data: {
         productionReleaseStatus: ProductionReleaseStatus.Released,
@@ -392,9 +414,16 @@ export class UnitsService {
       },
       include: this.unitSummaryInclude(),
     });
+    await this.activityLog.log({
+      unitId: id,
+      userId,
+      action: ActivityAction.UnitReleasedToProduction,
+      description: `Released to Production - now waiting for ${fabrication.name}`,
+    });
+    return updated;
   }
 
-  async startManufacturing(id: string) {
+  async startManufacturing(id: string, userId: string) {
     const unit = await this.findOne(id);
     if (unit.productionReleaseStatus !== ProductionReleaseStatus.Released) throw new ConflictException('Manager must release this unit before manufacturing can start');
     const firstTasks = unit.parts.map((part) => part.tasks.find((task) => task.status === TaskStatus.Pending)).filter(Boolean);
@@ -402,6 +431,12 @@ export class UnitsService {
       for (const task of firstTasks) await tx.productionTask.update({ where: { id: task!.id }, data: { status: TaskStatus.Ready } });
       const firstDepartmentId = firstTasks[0]?.departmentId ?? unit.currentDepartmentId;
       await tx.unit.update({ where: { id }, data: { productionReleaseStatus: ProductionReleaseStatus.Started, manufacturingStartedAt: new Date(), status: UnitStatus.InProgress, currentDepartmentId: firstDepartmentId, currentStage: firstTasks[0]?.processDefinition?.name ?? 'Manufacturing' } });
+    });
+    await this.activityLog.log({
+      unitId: id,
+      userId,
+      action: ActivityAction.ManufacturingStarted,
+      description: 'Manufacturing started - first routed steps are ready',
     });
     return this.findOne(id);
   }
@@ -412,23 +447,50 @@ export class UnitsService {
   // finished, since parts can be arriving from multiple sources
   // (Fabrication tasks, vendor parts) concurrently by the time Assembly
   // is ready to begin.
-  async startAssembly(id: string, teamName: string) {
+  async startAssembly(id: string, teamName: string, userId: string) {
     const unit = await this.findOne(id);
     if (unit.assemblyStartedAt) throw new ConflictException('Assembly has already started for this unit');
     await this.prisma.unit.update({
       where: { id },
       data: { assignedTeamName: teamName, assemblyStartedAt: new Date() },
     });
+    await this.activityLog.log({
+      unitId: id,
+      userId,
+      action: ActivityAction.AssemblyStarted,
+      description: `Assembly build started - team ${teamName}`,
+    });
     return this.findOne(id);
   }
 
-  async update(id: string, dto: UpdateUnitDto) {
-    await this.findOne(id);
+  async update(id: string, dto: UpdateUnitDto, userId?: string) {
+    const before = await this.findOne(id);
     const data: Prisma.UnitUpdateInput = { serialNumber: dto.serialNumber, displayName: dto.displayName, status: dto.status, currentStage: dto.currentStage, isBlocked: dto.isBlocked, holdReason: dto.holdReason, oneDriveFolderUrl: dto.oneDriveFolderUrl, priorityPosition: dto.priorityPosition, productionMonth: dto.productionMonth ? this.monthValue(dto.productionMonth) : undefined, dueDate: dto.dueDate ? new Date(dto.dueDate) : undefined, specifications: dto.specifications as Prisma.InputJsonValue | undefined, unitType: dto.unitTypeId ? { connect: { id: dto.unitTypeId } } : undefined, priorityLevel: dto.priorityLevelId ? { connect: { id: dto.priorityLevelId } } : undefined, currentDepartment: dto.currentDepartmentId ? { connect: { id: dto.currentDepartmentId } } : undefined };
-    return this.prisma.unit.update({ where: { id }, data, include: this.unitSummaryInclude() });
+    const updated = await this.prisma.unit.update({ where: { id }, data, include: this.unitSummaryInclude() });
+    if (dto.isBlocked !== undefined && dto.isBlocked !== before.isBlocked) {
+      await this.activityLog.log({
+        unitId: id,
+        userId,
+        action: dto.isBlocked ? ActivityAction.UnitBlocked : ActivityAction.UnitUnblocked,
+        description: dto.isBlocked ? `Blocked${dto.holdReason ? `: ${dto.holdReason}` : ''}` : 'Hold removed',
+      });
+    }
+    return updated;
   }
 
-  async addComment(id: string, dto: AddUnitCommentDto, userId: string) { await this.findOne(id); return this.prisma.unitComment.create({ data: { unitId: id, userId, message: dto.message, isDelay: dto.isDelay ?? false }, include: { user: { select: { id: true, name: true, email: true } } } }); }
+  async addComment(id: string, dto: AddUnitCommentDto, userId: string) {
+    await this.findOne(id);
+    const comment = await this.prisma.unitComment.create({ data: { unitId: id, userId, message: dto.message, isDelay: dto.isDelay ?? false }, include: { user: { select: { id: true, name: true, email: true } } } });
+    if (dto.isDelay) {
+      await this.activityLog.log({
+        unitId: id,
+        userId,
+        action: ActivityAction.DelayReported,
+        description: dto.message,
+      });
+    }
+    return comment;
+  }
   async remove(id: string) { await this.findOne(id); const count = await this.prisma.productionTask.count({ where: { OR: [{ unitId: id }, { part: { unitId: id } }], status: { in: ['InProgress', 'PendingVerification'] } } }); if (count) throw new ConflictException('Cannot delete unit with tasks in progress'); return this.prisma.unit.update({ where: { id }, data: { deletedAt: new Date() } }); }
   async getAllTasks(unitId: string) { await this.findOne(unitId); return this.prisma.productionTask.findMany({ where: { OR: [{ unitId }, { part: { unitId } }] }, include: { processDefinition: { include: { department: true } }, department: true, priorityLevel: true, assignedUser: { select: { id: true, name: true, email: true } }, part: { include: { partType: true } } }, orderBy: [{ part: { identifier: 'asc' } }, { sequenceOrder: 'asc' }] }); }
 

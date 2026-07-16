@@ -6,7 +6,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { useAuthStore } from '@/store/auth.store';
 import { PageHeader, Button, EmptyState, Spinner, Modal, Input, Select, Card, ProgressBar, Textarea, Badge } from '@/components/shared';
-import { Plus, Package, ChevronRight, CheckCircle, Circle, Clock, AlertCircle, ExternalLink, MessageSquare, AlertTriangle } from 'lucide-react';
+import { Plus, Package, ChevronRight, CheckCircle, Circle, Clock, AlertCircle, ExternalLink, MessageSquare, AlertTriangle, History } from 'lucide-react';
 import Link from 'next/link';
 import { toast } from '@/components/shared';
 import { cn, PART_STATUS_BG, STATUS_BG, STATUS_LABELS } from '@/lib/utils';
@@ -31,6 +31,11 @@ export default function UnitDetailPage() {
   const { data: unit, isLoading } = useQuery({
     queryKey: ['unit', id],
     queryFn: () => api.units.get(id),
+  });
+
+  const { data: activity = [] } = useQuery({
+    queryKey: ['unit', id, 'activity'],
+    queryFn: () => api.units.activity(id),
   });
 
   const { data: partTypes } = useQuery({
@@ -170,6 +175,28 @@ export default function UnitDetailPage() {
               {(unit.comments ?? []).map((item: any) => <div key={item.id} className={cn('rounded-md border border-border p-2.5', item.isDelay && 'border-amber-500/40 bg-amber-500/5')}><div className="flex justify-between gap-3 text-xs"><span className="font-medium">{item.user?.name}</span><span className="text-muted-foreground">{new Date(item.createdAt).toLocaleString()}</span></div><p className="text-sm mt-1 whitespace-pre-wrap">{item.message}</p></div>)}
               {!unit.comments?.length && <p className="text-xs text-muted-foreground">No comments yet.</p>}
             </div>
+          </Card>
+
+          <Card className="p-4">
+            <div className="flex items-center gap-2 mb-4"><History className="w-4 h-4" /><h2 className="text-sm font-semibold">Activity timeline</h2></div>
+            {activity.length === 0 ? (
+              <p className="text-xs text-muted-foreground">Nothing recorded yet.</p>
+            ) : (
+              <div className="space-y-0 max-h-96 overflow-y-auto">
+                {activity.map((entry: any, index: number) => (
+                  <div key={entry.id} className="relative pl-6 pb-4">
+                    {index < activity.length - 1 && (
+                      <div className="absolute left-[7px] top-3 bottom-0 w-px bg-border" />
+                    )}
+                    <div className="absolute left-0 top-1 w-3.5 h-3.5 rounded-full border-2 border-primary bg-card" />
+                    <p className="text-sm text-foreground">{entry.description}</p>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      {entry.user?.name ?? 'System'} · {new Date(entry.createdAt).toLocaleString()}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            )}
           </Card>
         </div>
 

@@ -5,10 +5,12 @@ import {
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { IsString, IsOptional, IsBoolean, IsUUID, IsDateString } from 'class-validator';
+import { ActivityAction } from '@prisma/client';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { JwtPayload } from '@hvacflow/shared-types';
+import { ActivityLogModule, ActivityLogService } from '../activity-log/activity-log.module';
 
 // ─── DTOs ─────────────────────────────────────────────────────────────────────
 
@@ -29,7 +31,10 @@ class UpdateVendorPartDto {
 
 @Injectable()
 export class VendorPartsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly activityLog: ActivityLogService,
+  ) {}
 
   listByUnit(unitId: string) {
     return this.prisma.vendorPart.findMany({
@@ -43,7 +48,7 @@ export class VendorPartsService {
     const unit = await this.prisma.unit.findUnique({ where: { id: unitId, deletedAt: null } });
     if (!unit) throw new NotFoundException('Unit not found');
 
-    return this.prisma.vendorPart.create({
+    const vendorPart = await this.prisma.vendorPart.create({
       data: {
         unitId,
         partTypeId: dto.partTypeId,
@@ -57,14 +62,21 @@ export class VendorPartsService {
       },
       include: { partType: true, addedByUser: { select: { id: true, name: true } } },
     });
+    await this.activityLog.log({
+      unitId,
+      userId,
+      action: dto.isReceived ? ActivityAction.VendorPartReceived : ActivityAction.VendorPartLogged,
+      description: dto.isReceived ? `${vendorPart.partType.name} received` : `${vendorPart.partType.name} logged as needed from vendor`,
+    });
+    return vendorPart;
   }
 
-  async update(id: string, dto: UpdateVendorPartDto) {
-    const existing = await this.prisma.vendorPart.findUnique({ where: { id } });
+  async update(id: string, dto: UpdateVendorPartDto, userId?: string) {
+    const existing = await this.prisma.vendorPart.findUnique({ where: { id }, include: { partType: true } });
     if (!existing) throw new NotFoundException('Vendor part not found');
 
     const isReceived = dto.isReceived ?? existing.isReceived;
-    return this.prisma.vendorPart.update({
+    const updated = await this.prisma.vendorPart.update({
       where: { id },
       data: {
         ...(dto.isReceived !== undefined ? { isReceived: dto.isReceived } : {}),
@@ -78,6 +90,18 @@ export class VendorPartsService {
       },
       include: { partType: true, addedByUser: { select: { id: true, name: true } } },
     });
+    // Only log the meaningful transition (newly marked received), not
+    // every date-only edit - that would flood the timeline with noise
+    // every time a date gets adjusted for a delay.
+    if (dto.isReceived === true && !existing.isReceived) {
+      await this.activityLog.log({
+        unitId: existing.unitId,
+        userId,
+        action: ActivityAction.VendorPartReceived,
+        description: `${existing.partType.name} received`,
+      });
+    }
+    return updated;
   }
 
   async remove(id: string) {
@@ -109,8 +133,8 @@ export class VendorPartsController {
 
   @Patch('vendor-parts/:id')
   @RequirePermissions('vendor-part:manage')
-  update(@Param('id') id: string, @Body() dto: UpdateVendorPartDto) {
-    return this.service.update(id, dto);
+  update(@Param('id') id: string, @Body() dto: UpdateVendorPartDto, @CurrentUser() user: JwtPayload) {
+    return this.service.update(id, dto, user.sub);
   }
 
   @Delete('vendor-parts/:id')
@@ -123,6 +147,7 @@ export class VendorPartsController {
 // ─── Module ───────────────────────────────────────────────────────────────────
 
 @Module({
+  imports: [ActivityLogModule],
   controllers: [VendorPartsController],
   providers: [VendorPartsService],
   exports: [VendorPartsService],

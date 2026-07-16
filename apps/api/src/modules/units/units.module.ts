@@ -13,6 +13,7 @@ import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { JwtPayload } from '@hvacflow/shared-types';
 import { WorkflowProgressModule } from '../workflow-progress/workflow-progress.module';
 import { RealtimeModule } from '../realtime/realtime.module';
+import { ActivityLogModule } from '../activity-log/activity-log.module';
 import { PaginationQueryDto } from '../../common/dto/pagination.dto';
 import { UnitStatus } from '@prisma/client';
 
@@ -80,11 +81,11 @@ export class UnitsController {
 
   @Post('units/:id/engineering/advance')
   @RequirePermissions('unit:manage')
-  advanceEngineering(@Param('id') id: string) { return this.service.advanceEngineering(id); }
+  advanceEngineering(@Param('id') id: string, @CurrentUser() user: JwtPayload) { return this.service.advanceEngineering(id, user.sub); }
 
   @Post('units/:id/mark-planned')
   @RequirePermissions('unit:plan')
-  markPlanned(@Param('id') id: string) { return this.service.markPlanned(id); }
+  markPlanned(@Param('id') id: string, @CurrentUser() user: JwtPayload) { return this.service.markPlanned(id, user.sub); }
 
   @Post('units/:id/release')
   @RequirePermissions('unit:manage')
@@ -92,11 +93,11 @@ export class UnitsController {
 
   @Post('units/:id/start-manufacturing')
   @RequirePermissions('task:start')
-  startManufacturing(@Param('id') id: string) { return this.service.startManufacturing(id); }
+  startManufacturing(@Param('id') id: string, @CurrentUser() user: JwtPayload) { return this.service.startManufacturing(id, user.sub); }
 
   @Post('units/:id/start-assembly')
   @RequirePermissions('task:start')
-  startAssembly(@Param('id') id: string, @Body() dto: StartAssemblyDto) { return this.service.startAssembly(id, dto.teamName); }
+  startAssembly(@Param('id') id: string, @Body() dto: StartAssemblyDto, @CurrentUser() user: JwtPayload) { return this.service.startAssembly(id, dto.teamName, user.sub); }
 
   @Post('units/:id/comments')
   @RequirePermissions('unit:view')
@@ -124,8 +125,8 @@ export class UnitsController {
 
   @Patch('units/:id')
   @RequirePermissions('unit:manage')
-  update(@Param('id') id: string, @Body() dto: UpdateUnitDto) {
-    return this.service.update(id, dto);
+  update(@Param('id') id: string, @Body() dto: UpdateUnitDto, @CurrentUser() user: JwtPayload) {
+    return this.service.update(id, dto, user.sub);
   }
 
   @Delete('units/:id')
@@ -142,7 +143,7 @@ export class UnitsController {
 }
 
 @Module({
-  imports: [WorkflowProgressModule, RealtimeModule],
+  imports: [WorkflowProgressModule, RealtimeModule, ActivityLogModule],
   controllers: [UnitsController],
   providers: [UnitsService],
   exports: [UnitsService],

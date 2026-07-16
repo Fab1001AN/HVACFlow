@@ -312,6 +312,7 @@ export const api = {
     engineeringQueue: () => api.get<any[]>('/units/engineering-queue'),
     plannerQueue: () => api.get<any[]>('/units/planner-queue'),
     assemblySummary: () => api.get<{ wip: any[]; upcoming: any[] }>('/units/assembly-summary'),
+    activity: (id: string) => api.get<any[]>(`/units/${id}/activity`),
     markPlanned: (id: string) => api.post<any>(`/units/${id}/mark-planned`, {}),
     startAssembly: (id: string, teamName: string) => api.post<any>(`/units/${id}/start-assembly`, { teamName }),
     listByOrder: (orderId: string, params?: any) =>

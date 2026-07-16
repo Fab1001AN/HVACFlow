@@ -10,6 +10,8 @@ import { PrismaService } from '../../common/prisma/prisma.service';
 import { WorkflowProgressService } from '../workflow-progress/workflow-progress.service';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
 import { ChecklistsService } from '../checklists/checklists.service';
+import { ActivityLogService } from '../activity-log/activity-log.module';
+import { ActivityAction } from '@prisma/client';
 import { TaskStatus } from '@hvacflow/shared-types';
 import { IsOptional, IsString, IsUUID, IsBoolean } from 'class-validator';
 
@@ -56,6 +58,7 @@ export class ProductionTasksService {
     private readonly workflowProgress: WorkflowProgressService,
     private readonly realtime: RealtimeGateway,
     private readonly checklists: ChecklistsService,
+    private readonly activityLog: ActivityLogService,
   ) {}
 
   async findAll(query: QueryTasksDto, callerDeptIds: string[], hasViewAll: boolean) {
@@ -220,6 +223,15 @@ export class ProductionTasksService {
     // If fully completed (no verification needed), cascade and recompute
     if (nextStatus === TaskStatus.Completed) {
       await this.onTaskCompleted(updated);
+      const unitId = updated.unitId ?? updated.part?.unitId;
+      if (unitId) {
+        await this.activityLog.log({
+          unitId,
+          userId,
+          action: ActivityAction.TaskCompleted,
+          description: `${updated.processDefinition.name} completed${updated.part ? ` on ${updated.part.partType?.name ?? updated.part.identifier}` : ''}`,
+        });
+      }
     }
 
     return updated;
@@ -253,6 +265,15 @@ export class ProductionTasksService {
     });
 
     await this.onTaskCompleted(updated);
+    const unitId = updated.unitId ?? updated.part?.unitId;
+    if (unitId) {
+      await this.activityLog.log({
+        unitId,
+        userId,
+        action: ActivityAction.TaskCompleted,
+        description: `${updated.processDefinition.name} verified and completed${updated.part ? ` on ${updated.part.partType?.name ?? updated.part.identifier}` : ''}`,
+      });
+    }
     return updated;
   }
 

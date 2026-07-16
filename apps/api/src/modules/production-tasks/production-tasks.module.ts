@@ -7,6 +7,7 @@ import { JwtPayload, TaskStatus } from '@hvacflow/shared-types';
 import { WorkflowProgressModule } from '../workflow-progress/workflow-progress.module';
 import { RealtimeModule } from '../realtime/realtime.module';
 import { ChecklistsModule } from '../checklists/checklists.module';
+import { ActivityLogModule } from '../activity-log/activity-log.module';
 import { IsBoolean, IsOptional, IsString } from 'class-validator';
 
 class HoldRejectDto extends TaskActionDto {
@@ -137,7 +138,7 @@ export class ProductionTasksController {
 }
 
 @Module({
-  imports: [WorkflowProgressModule, RealtimeModule, ChecklistsModule],
+  imports: [WorkflowProgressModule, RealtimeModule, ChecklistsModule, ActivityLogModule],
   controllers: [ProductionTasksController],
   providers: [ProductionTasksService],
   exports: [ProductionTasksService],
