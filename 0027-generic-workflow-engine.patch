@@ -1,0 +1,938 @@
+From 2137511715217a749e77596ec1949745d0a0fe55 Mon Sep 17 00:00:00 2001
+From: Claude <claude@anthropic.com>
+Date: Fri, 17 Jul 2026 02:47:41 +0000
+Subject: [PATCH] Step 2 of the workflow-configurability plan: the generic
+ pipeline engine
+
+New WorkflowStage model - an admin defines any number of stages, in
+any order, each with its own name, optional department tie-in, and
+its own required permission (checked dynamically at runtime, not a
+static decorator, since the requirement isn't known until the stage
+row is read - this is a deliberate, necessary deviation from how every
+other endpoint in this app is gated). Unit gets a nullable
+currentWorkflowStageId - untouched by the existing Engineering/
+Planner/Manager/Assembly flow, which this doesn't modify at all.
+
+Built and shipped as new, standalone infrastructure on purpose, not
+bundled with migrating the real pipeline onto it - that's Step 3,
+deliberately separate so a mistake in the new engine can't take down
+what's currently working.
+
+New Configuration -> Workflow Stages page: create/edit/reorder (drag)/
+activate-deactivate/delete, all reusing Step 1's ImpactWarningModal
+before a risky change. New unit-level actions: advance, move-back
+(only if the stage explicitly allows it), and an admin override to
+jump directly to any stage. Added a small test panel on the unit
+detail page so these can actually be exercised end to end, not just
+CRUD'd with no way to prove a real unit moves through them.
+
+Found and fixed a real bug while checking this before calling it done:
+advance()/moveBack() originally computed a unit's current position
+using only ACTIVE stages - but Step 1's own impact-warning system
+explicitly allows deactivating a stage while units still sit on it (with
+confirmation). A unit parked on a since-deactivated stage would
+therefore be invisible to its own position lookup (findIndex returns
+-1, indistinguishable from "hasn't started yet"), silently resetting
+it to stage one instead of correctly continuing forward. Fixed by
+computing position from ALL stages, while still only routing INTO
+active ones - traced through every edge case (fresh unit, no stages
+configured, final stage, deleted stage, multiple consecutive inactive
+stages in either direction) to confirm this is actually correct now,
+not just no-longer-obviously-wrong.
+---
+ apps/api/src/app.module.ts                    |   2 +
+ .../workflow-stages/workflow-stages.module.ts | 306 ++++++++++++++++++
+ .../config/workflow-stages/page.tsx           | 278 ++++++++++++++++
+ apps/web/src/app/(dashboard)/layout.tsx       |   3 +-
+ .../src/app/(dashboard)/units/[id]/page.tsx   |  74 ++++-
+ apps/web/src/lib/api.ts                       |  14 +
+ .../migration.sql                             |  31 ++
+ prisma/schema.prisma                          |  39 +++
+ 8 files changed, 745 insertions(+), 2 deletions(-)
+ create mode 100644 apps/api/src/modules/workflow-stages/workflow-stages.module.ts
+ create mode 100644 apps/web/src/app/(dashboard)/config/workflow-stages/page.tsx
+ create mode 100644 prisma/migrations/20260716160000_add_workflow_stages/migration.sql
+
+diff --git a/apps/api/src/app.module.ts b/apps/api/src/app.module.ts
+index 7f40e41..e8e6bef 100644
+--- a/apps/api/src/app.module.ts
++++ b/apps/api/src/app.module.ts
+@@ -22,6 +22,7 @@ import { UnitsModule } from './modules/units/units.module';
+ import { VendorPartsModule } from './modules/vendor-parts/vendor-parts.module';
+ import { ActivityLogModule } from './modules/activity-log/activity-log.module';
+ import { OrganizationSettingsModule } from './modules/organization-settings/organization-settings.module';
++import { WorkflowStagesModule } from './modules/workflow-stages/workflow-stages.module';
+ import { PartsModule } from './modules/parts/parts.module';
+ import { ProductionTasksModule } from './modules/production-tasks/production-tasks.module';
+ import { WorkflowProgressModule } from './modules/workflow-progress/workflow-progress.module';
+@@ -68,6 +69,7 @@ import { ReportsModule } from './modules/reports/reports.module';
+     VendorPartsModule,
+     ActivityLogModule,
+     OrganizationSettingsModule,
++    WorkflowStagesModule,
+     PartsModule,
+ 
+     // ─── Production Task Engine ─────────────────────────────────────────────
+diff --git a/apps/api/src/modules/workflow-stages/workflow-stages.module.ts b/apps/api/src/modules/workflow-stages/workflow-stages.module.ts
+new file mode 100644
+index 0000000..986b80a
+--- /dev/null
++++ b/apps/api/src/modules/workflow-stages/workflow-stages.module.ts
+@@ -0,0 +1,306 @@
++import {
++  Injectable, NotFoundException, ConflictException, ForbiddenException,
++  Controller, Get, Post, Patch, Delete,
++  Body, Param, Module,
++} from '@nestjs/common';
++import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
++import { PartialType } from '@nestjs/swagger';
++import { IsString, IsOptional, IsBoolean, IsUUID, IsArray, MaxLength, ValidateNested } from 'class-validator';
++import { Type } from 'class-transformer';
++import { ActivityAction } from '@prisma/client';
++import { PrismaService } from '../../common/prisma/prisma.service';
++import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
++import { CurrentUser } from '../../common/decorators/current-user.decorator';
++import { JwtPayload } from '@hvacflow/shared-types';
++import { ActivityLogModule, ActivityLogService } from '../activity-log/activity-log.module';
++
++// ─── DTOs ─────────────────────────────────────────────────────────────────────
++
++class CreateWorkflowStageDto {
++  @IsString() @MaxLength(100) name: string;
++  @IsOptional() @IsUUID() departmentId?: string;
++  @IsString() @MaxLength(100) requiredPermission: string;
++  @IsOptional() @IsString() @MaxLength(50) actionLabel?: string;
++  @IsOptional() @IsBoolean() allowsBackward?: boolean;
++}
++
++class UpdateWorkflowStageDto extends PartialType(CreateWorkflowStageDto) {
++  @IsOptional() @IsBoolean() isActive?: boolean;
++}
++
++class ReorderItemDto {
++  @IsUUID() id: string;
++  sortOrder: number;
++}
++
++class ReorderWorkflowStagesDto {
++  @IsArray()
++  @ValidateNested({ each: true })
++  @Type(() => ReorderItemDto)
++  items: ReorderItemDto[];
++}
++
++class MoveBackDto {
++  @IsOptional() @IsString() @MaxLength(500) reason?: string;
++}
++
++class SetStageDto {
++  @IsUUID() stageId: string;
++}
++
++// ─── Service ──────────────────────────────────────────────────────────────────
++
++@Injectable()
++export class WorkflowStagesService {
++  constructor(
++    private readonly prisma: PrismaService,
++    private readonly activityLog: ActivityLogService,
++  ) {}
++
++  findAll() {
++    return this.prisma.workflowStage.findMany({
++      include: { department: true, _count: { select: { units: true } } },
++      orderBy: { sortOrder: 'asc' },
++    });
++  }
++
++  async findOne(id: string) {
++    const stage = await this.prisma.workflowStage.findUnique({ where: { id }, include: { department: true } });
++    if (!stage) throw new NotFoundException('Workflow stage not found');
++    return stage;
++  }
++
++  // Same reasoning as ProcessDefinitionsService.impact()/DepartmentsService.impact()
++  // from Step 1 - editing or deactivating a stage that units are
++  // currently sitting on is a real, immediate risk, not a hypothetical
++  // one. Reusing the identical pattern rather than inventing a new one.
++  async impact(id: string) {
++    const unitsHere = await this.prisma.unit.count({ where: { currentWorkflowStageId: id, deletedAt: null } });
++    return { unitsHere };
++  }
++
++  async create(dto: CreateWorkflowStageDto) {
++    const maxOrder = await this.prisma.workflowStage.aggregate({ _max: { sortOrder: true } });
++    return this.prisma.workflowStage.create({
++      data: { ...dto, sortOrder: (maxOrder._max.sortOrder ?? 0) + 1 },
++      include: { department: true },
++    });
++  }
++
++  async update(id: string, dto: UpdateWorkflowStageDto) {
++    await this.findOne(id);
++    return this.prisma.workflowStage.update({ where: { id }, data: dto, include: { department: true } });
++  }
++
++  async remove(id: string) {
++    const unitsHere = await this.prisma.unit.count({ where: { currentWorkflowStageId: id } });
++    if (unitsHere > 0) {
++      throw new ConflictException(
++        `Cannot delete - ${unitsHere} unit(s) are currently on this stage. Move them first, or deactivate the stage instead of deleting it.`,
++      );
++    }
++    return this.prisma.workflowStage.delete({ where: { id } });
++  }
++
++  async reorder(dto: ReorderWorkflowStagesDto) {
++    await this.prisma.$transaction(
++      dto.items.map((item) => this.prisma.workflowStage.update({ where: { id: item.id }, data: { sortOrder: item.sortOrder } })),
++    );
++    return this.findAll();
++  }
++
++  private assertPermission(user: JwtPayload, requiredPermission: string) {
++    // Each stage carries its OWN required permission, configured by an
++    // admin at setup time - this can't be a static @RequirePermissions()
++    // decorator the way every other endpoint in this app uses, since
++    // the actual requirement isn't known until the stage row is read.
++    if (!user.permissions.includes(requiredPermission)) {
++      throw new ForbiddenException(`You don't have the '${requiredPermission}' permission required for this stage`);
++    }
++  }
++
++  private async allStagesOrdered() {
++    return this.prisma.workflowStage.findMany({ orderBy: { sortOrder: 'asc' } });
++  }
++
++  async advance(unitId: string, user: JwtPayload) {
++    const unit = await this.prisma.unit.findUnique({ where: { id: unitId, deletedAt: null } });
++    if (!unit) throw new NotFoundException('Unit not found');
++
++    // Deliberately look up the unit's CURRENT position among ALL stages,
++    // not just active ones - Step 1's own impact-warning system allows
++    // deactivating a stage while units still sit on it (with a
++    // confirmation), so a unit can legitimately be parked on an
++    // inactive stage. Using only-active stages to find "where am I now"
++    // would make that unit invisible to its own position (findIndex
++    // returns -1, identical to "hasn't started yet"), silently sending
++    // it back to stage one instead of correctly continuing forward.
++    // Only the DESTINATION needs to be active - you can leave an
++    // inactive stage, you just can't be routed INTO one.
++    const allStages = await this.allStagesOrdered();
++    if (allStages.filter((s) => s.isActive).length === 0) {
++      throw new ConflictException('No workflow stages configured yet - set them up in Configuration first');
++    }
++
++    const currentIndex = unit.currentWorkflowStageId ? allStages.findIndex((s) => s.id === unit.currentWorkflowStageId) : -1;
++    let nextStage: (typeof allStages)[number] | undefined;
++    for (let i = currentIndex + 1; i < allStages.length; i++) {
++      if (allStages[i].isActive) { nextStage = allStages[i]; break; }
++    }
++    if (!nextStage) throw new ConflictException('Already at the final stage');
++    this.assertPermission(user, nextStage.requiredPermission);
++
++    const updated = await this.prisma.unit.update({
++      where: { id: unitId },
++      data: { currentWorkflowStageId: nextStage.id },
++      include: { currentWorkflowStage: true },
++    });
++    await this.activityLog.log({
++      unitId,
++      userId: user.sub,
++      action: ActivityAction.WorkflowStageAdvanced,
++      description: `Advanced to ${nextStage.name}`,
++    });
++    return updated;
++  }
++
++  async moveBack(unitId: string, dto: MoveBackDto, user: JwtPayload) {
++    const unit = await this.prisma.unit.findUnique({ where: { id: unitId, deletedAt: null } });
++    if (!unit) throw new NotFoundException('Unit not found');
++    if (!unit.currentWorkflowStageId) throw new ConflictException('This unit is not on any stage yet');
++
++    const allStages = await this.allStagesOrdered();
++    const currentIndex = allStages.findIndex((s) => s.id === unit.currentWorkflowStageId);
++    if (currentIndex < 0) throw new ConflictException('This unit\'s current stage no longer exists - use the admin override to set a valid stage');
++    if (currentIndex === 0) throw new ConflictException('Already at the first stage');
++
++    const currentStage = allStages[currentIndex];
++    if (!currentStage.allowsBackward) {
++      throw new ConflictException(`${currentStage.name} does not allow moving backward - enable it in Configuration if this should be possible`);
++    }
++    this.assertPermission(user, currentStage.requiredPermission);
++
++    let prevStage: (typeof allStages)[number] | undefined;
++    for (let i = currentIndex - 1; i >= 0; i--) {
++      if (allStages[i].isActive) { prevStage = allStages[i]; break; }
++    }
++    if (!prevStage) throw new ConflictException('No active stage before this one to move back to');
++
++    const updated = await this.prisma.unit.update({
++      where: { id: unitId },
++      data: { currentWorkflowStageId: prevStage.id },
++      include: { currentWorkflowStage: true },
++    });
++    await this.activityLog.log({
++      unitId,
++      userId: user.sub,
++      action: ActivityAction.WorkflowStageMovedBack,
++      description: `Sent back to ${prevStage.name}${dto.reason ? ` - ${dto.reason}` : ''}`,
++    });
++    return updated;
++  }
++
++  // Admin override - jump directly to any stage, skipping the normal
++  // sequence entirely. Deliberately gated on config:manage (not a
++  // per-stage permission) and always logged distinctly from a normal
++  // advance/move-back, since this is a manual correction, not a real
++  // workflow transition.
++  async setStage(unitId: string, dto: SetStageDto, userId: string) {
++    const [unit, stage] = await Promise.all([
++      this.prisma.unit.findUnique({ where: { id: unitId, deletedAt: null } }),
++      this.prisma.workflowStage.findUnique({ where: { id: dto.stageId } }),
++    ]);
++    if (!unit) throw new NotFoundException('Unit not found');
++    if (!stage) throw new NotFoundException('Workflow stage not found');
++
++    const updated = await this.prisma.unit.update({
++      where: { id: unitId },
++      data: { currentWorkflowStageId: stage.id },
++      include: { currentWorkflowStage: true },
++    });
++    await this.activityLog.log({
++      unitId,
++      userId,
++      action: ActivityAction.WorkflowStageSet,
++      description: `Manually set to ${stage.name} (admin override)`,
++    });
++    return updated;
++  }
++}
++
++// ─── Controller ───────────────────────────────────────────────────────────────
++
++@ApiTags('Workflow Stages')
++@ApiBearerAuth()
++@Controller()
++export class WorkflowStagesController {
++  constructor(private readonly service: WorkflowStagesService) {}
++
++  @Get('workflow-stages')
++  @RequirePermissions('config:manage')
++  findAll() {
++    return this.service.findAll();
++  }
++
++  @Get('workflow-stages/:id')
++  @RequirePermissions('config:manage')
++  findOne(@Param('id') id: string) {
++    return this.service.findOne(id);
++  }
++
++  @Get('workflow-stages/:id/impact')
++  @RequirePermissions('config:manage')
++  impact(@Param('id') id: string) {
++    return this.service.impact(id);
++  }
++
++  @Post('workflow-stages')
++  @RequirePermissions('config:manage')
++  create(@Body() dto: CreateWorkflowStageDto) {
++    return this.service.create(dto);
++  }
++
++  @Patch('workflow-stages/reorder')
++  @RequirePermissions('config:manage')
++  reorder(@Body() dto: ReorderWorkflowStagesDto) {
++    return this.service.reorder(dto);
++  }
++
++  @Patch('workflow-stages/:id')
++  @RequirePermissions('config:manage')
++  update(@Param('id') id: string, @Body() dto: UpdateWorkflowStageDto) {
++    return this.service.update(id, dto);
++  }
++
++  @Delete('workflow-stages/:id')
++  @RequirePermissions('config:manage')
++  remove(@Param('id') id: string) {
++    return this.service.remove(id);
++  }
++
++  @Post('units/:id/workflow/advance')
++  advance(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
++    return this.service.advance(id, user);
++  }
++
++  @Post('units/:id/workflow/move-back')
++  moveBack(@Param('id') id: string, @Body() dto: MoveBackDto, @CurrentUser() user: JwtPayload) {
++    return this.service.moveBack(id, dto, user);
++  }
++
++  @Post('units/:id/workflow/set-stage')
++  @RequirePermissions('config:manage')
++  setStage(@Param('id') id: string, @Body() dto: SetStageDto, @CurrentUser() user: JwtPayload) {
++    return this.service.setStage(id, dto, user.sub);
++  }
++}
++
++// ─── Module ───────────────────────────────────────────────────────────────────
++
++@Module({
++  imports: [ActivityLogModule],
++  controllers: [WorkflowStagesController],
++  providers: [WorkflowStagesService],
++  exports: [WorkflowStagesService],
++})
++export class WorkflowStagesModule {}
+diff --git a/apps/web/src/app/(dashboard)/config/workflow-stages/page.tsx b/apps/web/src/app/(dashboard)/config/workflow-stages/page.tsx
+new file mode 100644
+index 0000000..a5e0f31
+--- /dev/null
++++ b/apps/web/src/app/(dashboard)/config/workflow-stages/page.tsx
+@@ -0,0 +1,278 @@
++'use client';
++
++import { useState } from 'react';
++import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
++import { api } from '@/lib/api';
++import { PageHeader, Button, Modal, Input, Select, EmptyState, Spinner, Card, Badge } from '@/components/shared';
++import { ImpactWarningModal } from '@/components/shared/impact-warning-modal';
++import { Plus, GripVertical, Pencil, Trash2, Workflow, Power, ArrowLeftRight } from 'lucide-react';
++import { toast } from '@/components/shared';
++import { cn } from '@/lib/utils';
++
++const EMPTY_FORM = { name: '', departmentId: '', requiredPermission: '', actionLabel: 'Advance', allowsBackward: false };
++
++export default function WorkflowStagesConfigPage() {
++  const queryClient = useQueryClient();
++  const [modalOpen, setModalOpen] = useState(false);
++  const [editing, setEditing] = useState<any>(null);
++  const [form, setForm] = useState({ ...EMPTY_FORM });
++  const [dragging, setDragging] = useState<string | null>(null);
++  const [pendingImpact, setPendingImpact] = useState<{ stage: any; impact: { unitsHere: number }; nextData: any } | null>(null);
++  const [checkingId, setCheckingId] = useState<string | null>(null);
++
++  const { data: stages = [], isLoading } = useQuery({
++    queryKey: ['workflow-stages'],
++    queryFn: () => api.workflowStages.list(),
++  });
++
++  const { data: departments = [] } = useQuery({
++    queryKey: ['departments'],
++    queryFn: () => api.departments.list({ isActive: true }),
++    staleTime: Infinity,
++  });
++
++  const { data: permissions = [] } = useQuery({
++    queryKey: ['permissions'],
++    queryFn: () => api.permissions.list(),
++    staleTime: Infinity,
++  });
++
++  const saveMutation = useMutation({
++    mutationFn: (body: any) => editing ? api.workflowStages.update(editing.id, body) : api.workflowStages.create(body),
++    onSuccess: () => {
++      queryClient.invalidateQueries({ queryKey: ['workflow-stages'] });
++      setModalOpen(false);
++      setEditing(null);
++      setForm({ ...EMPTY_FORM });
++      setPendingImpact(null);
++      toast(editing ? 'Stage updated' : 'Stage created', 'success');
++    },
++    onError: (err: any) => toast(err.message, 'error'),
++  });
++
++  const deleteMutation = useMutation({
++    mutationFn: (id: string) => api.workflowStages.delete(id),
++    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['workflow-stages'] }); toast('Stage deleted', 'success'); },
++    onError: (err: any) => toast(err.message, 'error'),
++  });
++
++  const toggleActiveMutation = useMutation({
++    mutationFn: (stage: any) => api.workflowStages.update(stage.id, { isActive: !stage.isActive }),
++    onSuccess: (_, stage) => {
++      queryClient.invalidateQueries({ queryKey: ['workflow-stages'] });
++      toast(stage.isActive ? `${stage.name} deactivated` : `${stage.name} activated`, 'success');
++    },
++    onError: (err: any) => toast(err.message, 'error'),
++  });
++
++  const reorderMutation = useMutation({
++    mutationFn: (items: Array<{ id: string; sortOrder: number }>) => api.workflowStages.reorder(items),
++    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['workflow-stages'] }),
++  });
++
++  const moveItem = (fromIdx: number, toIdx: number) => {
++    const next = [...(stages as any[])];
++    const [moved] = next.splice(fromIdx, 1);
++    next.splice(toIdx, 0, moved);
++    reorderMutation.mutate(next.map((s, i) => ({ id: s.id, sortOrder: i })));
++  };
++
++  const openCreate = () => { setEditing(null); setForm({ ...EMPTY_FORM }); setModalOpen(true); };
++  const openEdit = (stage: any) => {
++    setEditing(stage);
++    setForm({
++      name: stage.name,
++      departmentId: stage.departmentId ?? '',
++      requiredPermission: stage.requiredPermission,
++      actionLabel: stage.actionLabel,
++      allowsBackward: stage.allowsBackward,
++    });
++    setModalOpen(true);
++  };
++
++  const buildPayload = () => ({
++    ...form,
++    departmentId: form.departmentId || undefined,
++  });
++
++  // Editing an existing stage (its department, required permission, etc.)
++  // instantly changes what "advance" means for any unit currently
++  // sitting on it - check what's actually at stake before saving.
++  const handleSubmit = async () => {
++    const payload = buildPayload();
++    if (!editing) {
++      saveMutation.mutate(payload);
++      return;
++    }
++    setCheckingId(editing.id);
++    try {
++      const impact = await api.workflowStages.impact(editing.id);
++      if (impact.unitsHere > 0) {
++        setPendingImpact({ stage: editing, impact, nextData: payload });
++      } else {
++        saveMutation.mutate(payload);
++      }
++    } catch (err: any) {
++      toast(err.message ?? 'Could not check impact', 'error');
++    } finally {
++      setCheckingId(null);
++    }
++  };
++
++  const handleToggleActive = async (stage: any) => {
++    if (!stage.isActive) {
++      toggleActiveMutation.mutate(stage);
++      return;
++    }
++    setCheckingId(stage.id);
++    try {
++      const impact = await api.workflowStages.impact(stage.id);
++      if (impact.unitsHere > 0) {
++        setPendingImpact({ stage, impact, nextData: { isActive: false } });
++      } else {
++        toggleActiveMutation.mutate(stage);
++      }
++    } catch (err: any) {
++      toast(err.message ?? 'Could not check impact', 'error');
++    } finally {
++      setCheckingId(null);
++    }
++  };
++
++  const confirmPendingImpact = () => {
++    if (!pendingImpact) return;
++    if (pendingImpact.nextData.isActive === false) {
++      toggleActiveMutation.mutate(pendingImpact.stage);
++      setPendingImpact(null);
++    } else {
++      saveMutation.mutate(pendingImpact.nextData);
++    }
++  };
++
++  return (
++    <div className="flex flex-col h-full">
++      <PageHeader
++        title="Workflow Stages"
++        description="Define your own pipeline - as many stages as you need, in whatever order, each with its own required permission. New, standalone infrastructure - doesn't affect the existing Engineering/Planner/Manager/Assembly flow yet."
++        action={<Button leftIcon={<Plus className="w-4 h-4" />} onClick={openCreate}>New Stage</Button>}
++      />
++      <div className="flex-1 overflow-y-auto p-6">
++        {isLoading ? (
++          <div className="flex justify-center py-10"><Spinner /></div>
++        ) : stages.length === 0 ? (
++          <EmptyState
++            icon={<Workflow className="w-10 h-10" />}
++            title="No stages configured yet"
++            description="Add your first stage - units will move through them in this order."
++            action={<Button onClick={openCreate}>Add Stage</Button>}
++          />
++        ) : (
++          <Card className="overflow-hidden">
++            <div className="divide-y divide-border">
++              {(stages as any[]).map((stage: any, index: number) => (
++                <div
++                  key={stage.id}
++                  draggable
++                  onDragStart={() => setDragging(stage.id)}
++                  onDragOver={(e) => e.preventDefault()}
++                  onDrop={() => {
++                    if (dragging && dragging !== stage.id) {
++                      const fromIdx = (stages as any[]).findIndex((s) => s.id === dragging);
++                      moveItem(fromIdx, index);
++                    }
++                    setDragging(null);
++                  }}
++                  className={cn('flex items-center gap-4 px-4 py-3 group transition-colors', dragging === stage.id ? 'opacity-50' : 'hover:bg-accent/50')}
++                >
++                  <GripVertical className="w-4 h-4 text-muted-foreground cursor-grab active:cursor-grabbing flex-shrink-0" />
++                  <span className="text-xs text-muted-foreground w-5 text-center tabular-nums flex-shrink-0">{index + 1}</span>
++                  <div className="flex-1 min-w-0">
++                    <div className="flex items-center gap-2">
++                      <p className="text-sm font-medium text-foreground">{stage.name}</p>
++                      {stage.allowsBackward && <Badge variant="outline"><ArrowLeftRight className="w-3 h-3" /> Reversible</Badge>}
++                    </div>
++                    <p className="text-xs text-muted-foreground">
++                      {stage.department?.name ?? 'Not department-specific'} · needs <span className="font-mono">{stage.requiredPermission}</span> · button says &ldquo;{stage.actionLabel}&rdquo;
++                    </p>
++                  </div>
++                  <Badge variant="muted">{stage._count?.units ?? 0} unit(s) here</Badge>
++                  <span className={cn('text-xs px-2 py-0.5 rounded-md', stage.isActive ? 'bg-green-500/10 text-green-400' : 'bg-muted text-muted-foreground')}>
++                    {stage.isActive ? 'Active' : 'Inactive'}
++                  </span>
++                  <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
++                    <Button
++                      variant="ghost" size="sm"
++                      className={stage.isActive ? 'text-muted-foreground' : 'text-emerald-500'}
++                      loading={checkingId === stage.id}
++                      title={stage.isActive ? 'Deactivate' : 'Activate'}
++                      onClick={() => handleToggleActive(stage)}
++                    >
++                      <Power className="w-3.5 h-3.5" />
++                    </Button>
++                    <Button variant="ghost" size="sm" onClick={() => openEdit(stage)}><Pencil className="w-3.5 h-3.5" /></Button>
++                    <Button
++                      variant="ghost" size="sm" className="text-destructive hover:text-destructive"
++                      onClick={() => { if (confirm(`Delete ${stage.name}?`)) deleteMutation.mutate(stage.id); }}
++                    >
++                      <Trash2 className="w-3.5 h-3.5" />
++                    </Button>
++                  </div>
++                </div>
++              ))}
++            </div>
++          </Card>
++        )}
++      </div>
++
++      <Modal open={modalOpen} onClose={() => setModalOpen(false)}
++        title={editing ? 'Edit Stage' : 'New Stage'}
++        footer={
++          <div className="flex justify-end gap-2">
++            <Button variant="secondary" onClick={() => setModalOpen(false)}>Cancel</Button>
++            <Button loading={saveMutation.isPending || checkingId === editing?.id} disabled={!form.name || !form.requiredPermission}
++              onClick={handleSubmit}>
++              {editing ? 'Save Changes' : 'Create Stage'}
++            </Button>
++          </div>
++        }
++      >
++        <div className="space-y-4">
++          <Input label="Stage Name" value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} placeholder="e.g. Quality Sign-off" />
++          <Select
++            label="Department (optional)"
++            value={form.departmentId}
++            onChange={(e) => setForm((f) => ({ ...f, departmentId: e.target.value }))}
++            options={(departments as any[]).map((d) => ({ value: d.id, label: d.name }))}
++            placeholder="Not tied to a specific department"
++          />
++          <Select
++            label="Required permission"
++            value={form.requiredPermission}
++            onChange={(e) => setForm((f) => ({ ...f, requiredPermission: e.target.value }))}
++            options={(permissions as any[]).map((p) => ({ value: p.code, label: `${p.code} — ${p.description}` }))}
++            placeholder="Who's allowed to advance a unit out of this stage"
++          />
++          <Input label="Action button label" value={form.actionLabel} onChange={(e) => setForm((f) => ({ ...f, actionLabel: e.target.value }))} placeholder="Advance" />
++          <label className="flex items-center gap-2 cursor-pointer">
++            <input type="checkbox" checked={form.allowsBackward} onChange={(e) => setForm((f) => ({ ...f, allowsBackward: e.target.checked }))} className="rounded border-border" />
++            <span className="text-sm text-foreground">Allow sending a unit back to the previous stage from here</span>
++          </label>
++        </div>
++      </Modal>
++
++      <ImpactWarningModal
++        open={!!pendingImpact}
++        title={pendingImpact?.nextData.isActive === false ? `Deactivate ${pendingImpact?.stage.name}?` : `This stage is currently in use`}
++        lines={[
++          `${pendingImpact?.impact.unitsHere ?? 0} unit(s) are currently sitting on this stage.`,
++          pendingImpact?.nextData.isActive === false
++            ? 'Turning it off removes it from the active sequence - units here will need to be moved to a different stage manually (via admin override) before they can advance again.'
++            : 'Changing its department, required permission, or other settings takes effect immediately for those units.',
++        ]}
++        confirming={saveMutation.isPending || toggleActiveMutation.isPending}
++        onConfirm={confirmPendingImpact}
++        onCancel={() => setPendingImpact(null)}
++      />
++    </div>
++  );
++}
+diff --git a/apps/web/src/app/(dashboard)/layout.tsx b/apps/web/src/app/(dashboard)/layout.tsx
+index f52459b..84b46d1 100644
+--- a/apps/web/src/app/(dashboard)/layout.tsx
++++ b/apps/web/src/app/(dashboard)/layout.tsx
+@@ -10,7 +10,7 @@ import { cn, initials } from '@/lib/utils';
+ import {
+   LayoutDashboard, Users, FolderOpen, ShoppingBag, Box, Settings,
+   ChevronRight, LogOut, Building2, Sliders, Wrench, ClipboardList,
+-  BarChart3, Cpu, GitBranch, Tag, Package, ListChecks, Menu, X, CalendarDays, Factory, GripVertical, Eye, ClipboardCheck,
++  BarChart3, Cpu, GitBranch, Tag, Package, ListChecks, Menu, X, CalendarDays, Factory, GripVertical, Eye, ClipboardCheck, Workflow,
+ } from 'lucide-react';
+ 
+ const NAV_ITEMS = [
+@@ -27,6 +27,7 @@ const NAV_ITEMS = [
+ const CONFIG_ITEMS = [
+   { href: '/config/general', label: 'General', icon: Sliders },
+   { href: '/config/departments', label: 'Departments', icon: Building2 },
++  { href: '/config/workflow-stages', label: 'Workflow Stages', icon: Workflow },
+   { href: '/config/priority-levels', label: 'Priority Levels', icon: Tag },
+   { href: '/config/processes', label: 'Processes', icon: Cpu },
+   { href: '/config/routes', label: 'Process Routes', icon: GitBranch },
+diff --git a/apps/web/src/app/(dashboard)/units/[id]/page.tsx b/apps/web/src/app/(dashboard)/units/[id]/page.tsx
+index c435dc0..8bcbe68 100644
+--- a/apps/web/src/app/(dashboard)/units/[id]/page.tsx
++++ b/apps/web/src/app/(dashboard)/units/[id]/page.tsx
+@@ -6,7 +6,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+ import { api } from '@/lib/api';
+ import { useAuthStore } from '@/store/auth.store';
+ import { PageHeader, Button, EmptyState, Spinner, Modal, Input, Select, Card, ProgressBar, Textarea, Badge } from '@/components/shared';
+-import { Plus, Package, ChevronRight, CheckCircle, Circle, Clock, AlertCircle, ExternalLink, MessageSquare, AlertTriangle, History } from 'lucide-react';
++import { Plus, Package, ChevronRight, CheckCircle, Circle, Clock, AlertCircle, ExternalLink, MessageSquare, AlertTriangle, History, Workflow } from 'lucide-react';
+ import Link from 'next/link';
+ import { toast } from '@/components/shared';
+ import { cn, PART_STATUS_BG, STATUS_BG, STATUS_LABELS } from '@/lib/utils';
+@@ -65,6 +65,42 @@ export default function UnitDetailPage() {
+     onError: (err: any) => toast(err.message, 'error'),
+   });
+ 
++  // New generic workflow engine (Step 2) - standalone from the existing
++  // Engineering/Planner/Manager/Assembly flow above. Exists here so it
++  // can actually be exercised end to end, not just CRUD'd in
++  // Configuration with no way to prove it moves a real unit.
++  const { data: workflowStages = [] } = useQuery({
++    queryKey: ['workflow-stages'],
++    queryFn: () => api.workflowStages.list(),
++    enabled: hasPermission('config:manage'),
++  });
++  const workflowAdvanceMutation = useMutation({
++    mutationFn: () => api.units.workflowAdvance(id),
++    onSuccess: () => {
++      queryClient.invalidateQueries({ queryKey: ['unit', id] });
++      toast('Advanced to the next stage', 'success');
++    },
++    onError: (err: any) => toast(err.message, 'error'),
++  });
++  const workflowMoveBackMutation = useMutation({
++    mutationFn: () => api.units.workflowMoveBack(id),
++    onSuccess: () => {
++      queryClient.invalidateQueries({ queryKey: ['unit', id] });
++      toast('Sent back to the previous stage', 'success');
++    },
++    onError: (err: any) => toast(err.message, 'error'),
++  });
++  const [setStageId, setSetStageId] = useState('');
++  const workflowSetStageMutation = useMutation({
++    mutationFn: () => api.units.workflowSetStage(id, setStageId),
++    onSuccess: () => {
++      queryClient.invalidateQueries({ queryKey: ['unit', id] });
++      setSetStageId('');
++      toast('Stage set (admin override)', 'success');
++    },
++    onError: (err: any) => toast(err.message, 'error'),
++  });
++
+   const commentMutation = useMutation({
+     mutationFn: () => api.units.addComment(id, { message: comment, isDelay: delayComment }),
+     onSuccess: () => {
+@@ -177,6 +213,42 @@ export default function UnitDetailPage() {
+             </div>
+           </Card>
+ 
++          <Card className="p-4">
++            <div className="flex items-center gap-2 mb-1"><Workflow className="w-4 h-4" /><h2 className="text-sm font-semibold">Workflow Engine (new)</h2></div>
++            <p className="text-xs text-muted-foreground mb-4">Standalone from the pipeline above - only moves if this unit has been put on the new engine.</p>
++            <div className="flex items-center justify-between mb-3">
++              <span className="text-sm">Current stage</span>
++              <Badge variant={unit.currentWorkflowStage ? 'default' : 'muted'}>
++                {unit.currentWorkflowStage?.name ?? 'Not on this engine yet'}
++              </Badge>
++            </div>
++            <div className="flex gap-2 mb-4">
++              <Button size="sm" className="flex-1" loading={workflowAdvanceMutation.isPending} onClick={() => workflowAdvanceMutation.mutate()}>
++                Advance
++              </Button>
++              <Button size="sm" variant="secondary" className="flex-1" loading={workflowMoveBackMutation.isPending} onClick={() => workflowMoveBackMutation.mutate()}>
++                Move Back
++              </Button>
++            </div>
++            {hasPermission('config:manage') && (
++              <div className="pt-3 border-t border-border">
++                <p className="text-xs text-muted-foreground mb-2">Admin override - jump directly to any stage</p>
++                <div className="flex gap-2">
++                  <Select
++                    value={setStageId}
++                    onChange={(e) => setSetStageId(e.target.value)}
++                    options={(workflowStages as any[]).map((s: any) => ({ value: s.id, label: s.name }))}
++                    placeholder="Select a stage"
++                    className="flex-1"
++                  />
++                  <Button size="sm" variant="secondary" disabled={!setStageId} loading={workflowSetStageMutation.isPending} onClick={() => workflowSetStageMutation.mutate()}>
++                    Set
++                  </Button>
++                </div>
++              </div>
++            )}
++          </Card>
++
+           <Card className="p-4">
+             <div className="flex items-center gap-2 mb-4"><History className="w-4 h-4" /><h2 className="text-sm font-semibold">Activity timeline</h2></div>
+             {activity.length === 0 ? (
+diff --git a/apps/web/src/lib/api.ts b/apps/web/src/lib/api.ts
+index 46aae47..908f6e0 100644
+--- a/apps/web/src/lib/api.ts
++++ b/apps/web/src/lib/api.ts
+@@ -182,6 +182,17 @@ export const api = {
+     request<T>('DELETE', path, undefined, options),
+ 
+   // ─── Auth ────────────────────────────────────────────────────────────────
++  workflowStages: {
++    list: () => api.get<any[]>('/workflow-stages'),
++    get: (id: string) => api.get<any>(`/workflow-stages/${id}`),
++    impact: (id: string) => api.get<{ unitsHere: number }>(`/workflow-stages/${id}/impact`),
++    create: (body: any) => api.post<any>('/workflow-stages', body),
++    update: (id: string, body: any) => api.patch<any>(`/workflow-stages/${id}`, body),
++    delete: (id: string) => api.delete(`/workflow-stages/${id}`),
++    reorder: (items: Array<{ id: string; sortOrder: number }>) =>
++      api.patch<any[]>('/workflow-stages/reorder', { items }),
++  },
++
+   organizationSettings: {
+     get: () => api.get<{ id: string; name: string }>('/organization-settings'),
+     update: (name: string) => api.patch<{ id: string; name: string }>('/organization-settings', { name }),
+@@ -322,6 +333,9 @@ export const api = {
+     activity: (id: string) => api.get<any[]>(`/units/${id}/activity`),
+     markPlanned: (id: string) => api.post<any>(`/units/${id}/mark-planned`, {}),
+     startAssembly: (id: string, teamName: string) => api.post<any>(`/units/${id}/start-assembly`, { teamName }),
++    workflowAdvance: (id: string) => api.post<any>(`/units/${id}/workflow/advance`, {}),
++    workflowMoveBack: (id: string, reason?: string) => api.post<any>(`/units/${id}/workflow/move-back`, { reason }),
++    workflowSetStage: (id: string, stageId: string) => api.post<any>(`/units/${id}/workflow/set-stage`, { stageId }),
+     listByOrder: (orderId: string, params?: any) =>
+       api.get<any>(`/orders/${orderId}/units`, { params }),
+     get: (id: string) => api.get<any>(`/units/${id}`),
+diff --git a/prisma/migrations/20260716160000_add_workflow_stages/migration.sql b/prisma/migrations/20260716160000_add_workflow_stages/migration.sql
+new file mode 100644
+index 0000000..1bb1753
+--- /dev/null
++++ b/prisma/migrations/20260716160000_add_workflow_stages/migration.sql
+@@ -0,0 +1,31 @@
++-- Step 2 of the workflow-configurability plan: generic, admin-defined
++-- pipeline stages. Built as new, additive infrastructure alongside the
++-- existing hardcoded Engineering/Planner/Manager/Assembly flow, which
++-- this migration does not touch or modify in any way. Migrating the
++-- real pipeline onto this is a deliberately separate, later step.
++
++ALTER TYPE "ActivityAction" ADD VALUE 'WorkflowStageAdvanced';
++ALTER TYPE "ActivityAction" ADD VALUE 'WorkflowStageMovedBack';
++ALTER TYPE "ActivityAction" ADD VALUE 'WorkflowStageSet';
++
++CREATE TABLE "workflow_stages" (
++  "id" TEXT NOT NULL,
++  "name" TEXT NOT NULL,
++  "sortOrder" INTEGER NOT NULL DEFAULT 0,
++  "isActive" BOOLEAN NOT NULL DEFAULT true,
++  "departmentId" TEXT,
++  "requiredPermission" TEXT NOT NULL,
++  "actionLabel" TEXT NOT NULL DEFAULT 'Advance',
++  "allowsBackward" BOOLEAN NOT NULL DEFAULT false,
++  "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
++  "updatedAt" TIMESTAMP(3) NOT NULL,
++  CONSTRAINT "workflow_stages_pkey" PRIMARY KEY ("id")
++);
++
++CREATE UNIQUE INDEX "workflow_stages_name_key" ON "workflow_stages"("name");
++CREATE INDEX "workflow_stages_sortOrder_idx" ON "workflow_stages"("sortOrder");
++
++ALTER TABLE "workflow_stages" ADD CONSTRAINT "workflow_stages_departmentId_fkey" FOREIGN KEY ("departmentId") REFERENCES "departments"("id") ON DELETE SET NULL ON UPDATE CASCADE;
++
++ALTER TABLE "units" ADD COLUMN "currentWorkflowStageId" TEXT;
++ALTER TABLE "units" ADD CONSTRAINT "units_currentWorkflowStageId_fkey" FOREIGN KEY ("currentWorkflowStageId") REFERENCES "workflow_stages"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+diff --git a/prisma/schema.prisma b/prisma/schema.prisma
+index 006e951..e79580b 100644
+--- a/prisma/schema.prisma
++++ b/prisma/schema.prisma
+@@ -332,6 +332,11 @@ model Unit {
+   manufacturingStartedAt   DateTime?
+   assignedTeamName         String? // captured when Assembly clicks "Start Building Unit"
+   assemblyStartedAt        DateTime?
++  // New generic engine's position tracker - nullable and untouched by
++  // the existing Engineering/Planner/Manager/Assembly flow for now.
++  // Only units created/advanced through the new generic
++  // /units/:id/workflow/* endpoints ever set this.
++  currentWorkflowStageId   String?
+   isBlocked                Boolean    @default(false)
+   holdReason               String?
+   oneDriveFolderUrl        String?
+@@ -357,6 +362,7 @@ model Unit {
+   comments          UnitComment[]
+   vendorParts       VendorPart[]
+   activityLogs      ActivityLog[]
++  currentWorkflowStage WorkflowStage? @relation("UnitWorkflowStage", fields: [currentWorkflowStageId], references: [id], onDelete: SetNull)
+ 
+   @@index([orderId])
+   @@index([priorityLevelId])
+@@ -389,6 +395,9 @@ enum ActivityAction {
+   VendorPartLogged
+   UnitBlocked
+   UnitUnblocked
++  WorkflowStageAdvanced
++  WorkflowStageMovedBack
++  WorkflowStageSet
+ }
+ 
+ model ActivityLog {
+@@ -489,10 +498,40 @@ model Department {
+   machines           Machine[]
+   tasks              ProductionTask[]
+   currentUnits       Unit[]
++  workflowStages     WorkflowStage[]
+ 
+   @@map("departments")
+ }
+ 
++// Step 2 of the workflow-configurability plan: a generic, admin-defined
++// pipeline stage - the building block that will eventually replace the
++// hardcoded Planner -> Manager -> Fabrication -> Assembly sequence
++// (Unit.engineeringStatus / productionReleaseStatus / etc.). Built and
++// shipped as new, additive infrastructure FIRST, proven to work on its
++// own via its own admin UI - migrating the real, currently-working
++// pipeline onto it is a deliberately separate, later step (Step 3), not
++// bundled into this one. Ripping out a working state machine and a
++// brand new one in the same change is exactly how you end up unable to
++// tell which part broke.
++model WorkflowStage {
++  id                 String   @id @default(uuid())
++  name               String   @unique
++  sortOrder          Int      @default(0)
++  isActive           Boolean  @default(true)
++  departmentId       String? // null = cross-department stage (e.g. a Planner/Manager-style review step, not tied to shop-floor work)
++  requiredPermission String  // permission code needed to advance a unit out of this stage
++  actionLabel        String  @default("Advance") // button text shown for the advance action
++  allowsBackward     Boolean @default(false) // can a unit be sent back to the previous stage from here
++  createdAt          DateTime @default(now())
++  updatedAt          DateTime @updatedAt
++
++  department Department? @relation(fields: [departmentId], references: [id], onDelete: SetNull)
++  units      Unit[]       @relation("UnitWorkflowStage")
++
++  @@index([sortOrder])
++  @@map("workflow_stages")
++}
++
+ model ProcessDefinition {
+   id                       String     @id @default(uuid())
+   departmentId             String
+-- 
+2.43.0
+

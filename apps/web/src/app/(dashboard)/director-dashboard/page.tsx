@@ -98,7 +98,7 @@ function UnitListCard({ title, description, units }: { title: string; descriptio
                 <div className={cn('w-2 h-10 rounded-full', unit.isBlocked ? 'bg-red-500' : overdue ? 'bg-amber-500' : 'bg-blue-500')} />
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2"><span className="font-medium text-sm">{unit.serialNumber}</span><Badge variant="outline">{unit.unitType?.code}</Badge>{unit.isBlocked && <Badge className="bg-red-500/10 text-red-400">Blocked</Badge>}</div>
-                  <p className="text-xs text-muted-foreground truncate mt-0.5">{unit.holdReason || unit.currentStage || unit.currentDepartment?.name || 'Engineering'}</p>
+                  <p className="text-xs text-muted-foreground truncate mt-0.5">{unit.holdReason || unit.currentStage || unit.currentDepartment?.name || 'Detailing'}</p>
                   {unit.latestDelayComment && (
                     <p className="text-xs text-amber-500 truncate mt-0.5 flex items-center gap-1">
                       <AlertTriangle className="w-3 h-3 flex-shrink-0" />

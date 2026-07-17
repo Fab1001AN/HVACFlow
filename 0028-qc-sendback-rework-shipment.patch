@@ -1,0 +1,912 @@
+From 8eb4d351e90aeb7b067d2f4467d28093496e56a8 Mon Sep 17 00:00:00 2001
+From: Claude <claude@anthropic.com>
+Date: Fri, 17 Jul 2026 11:59:37 +0000
+Subject: [PATCH 1/2] QC send-back: send a unit to any earlier active stage,
+ not just one step
+
+moveBack() only ever moved a unit exactly one stage back - not enough
+for "QC sends it back to Fabrication" when QC sits several stages
+later in the sequence. Also loosened GET /workflow-stages from
+config:manage to just authentication - a QC user picking a target
+department for send-back needs to see the stage list, and they won't
+generally hold full admin config permissions; stage names aren't
+sensitive, create/update/delete/reorder still require config:manage.
+
+New POST /units/:id/workflow/send-back - takes an explicit target
+stage id and a REQUIRED reason (not optional, unlike moveBack's), only
+allows targets earlier in the sequence than the current stage, checked
+against the current stage's own required permission (same authorization
+model as moveBack - it's QC's own clearance that matters, not the
+target department's). Logged distinctly on the activity timeline with
+both the reason and which stage it came from.
+
+New Send Back panel on the unit detail page, available to anyone
+(not gated behind admin) - a stage picker plus a required reason field.
+---
+ .../workflow-stages/workflow-stages.module.ts | 51 ++++++++++++++++++-
+ 1 file changed, 49 insertions(+), 2 deletions(-)
+
+diff --git a/apps/api/src/modules/workflow-stages/workflow-stages.module.ts b/apps/api/src/modules/workflow-stages/workflow-stages.module.ts
+index 986b80a..983fc6b 100644
+--- a/apps/api/src/modules/workflow-stages/workflow-stages.module.ts
++++ b/apps/api/src/modules/workflow-stages/workflow-stages.module.ts
+@@ -44,6 +44,11 @@ class MoveBackDto {
+   @IsOptional() @IsString() @MaxLength(500) reason?: string;
+ }
+ 
++class SendBackDto {
++  @IsUUID() targetStageId: string;
++  @IsString() @MaxLength(500) reason: string;
++}
++
+ class SetStageDto {
+   @IsUUID() stageId: string;
+ }
+@@ -205,6 +210,45 @@ export class WorkflowStagesService {
+   // per-stage permission) and always logged distinctly from a normal
+   // advance/move-back, since this is a manual correction, not a real
+   // workflow transition.
++  // The QC scenario needs more than moveBack()'s strict single-step:
++  // "send it back to Fabrication" from a QC stage near the end of the
++  // pipeline needs to reach an arbitrary earlier stage, not just the
++  // immediately preceding one. Reason is required - this is exactly the
++  // kind of action that needs a paper trail (who sent it back, and why),
++  // logged distinctly from a normal advance so it's visibly different on
++  // the timeline, not just another step.
++  async sendBack(unitId: string, dto: SendBackDto, user: JwtPayload) {
++    const unit = await this.prisma.unit.findUnique({ where: { id: unitId, deletedAt: null } });
++    if (!unit) throw new NotFoundException('Unit not found');
++    if (!unit.currentWorkflowStageId) throw new ConflictException('This unit is not on any stage yet');
++
++    const allStages = await this.allStagesOrdered();
++    const currentIndex = allStages.findIndex((s) => s.id === unit.currentWorkflowStageId);
++    if (currentIndex < 0) throw new ConflictException('This unit\'s current stage no longer exists - use the admin override to set a valid stage');
++
++    const currentStage = allStages[currentIndex];
++    this.assertPermission(user, currentStage.requiredPermission);
++
++    const targetStage = allStages.find((s) => s.id === dto.targetStageId);
++    if (!targetStage) throw new NotFoundException('Target stage not found');
++    if (!targetStage.isActive) throw new ConflictException(`${targetStage.name} is not active - activate it first or choose a different stage`);
++    const targetIndex = allStages.findIndex((s) => s.id === targetStage.id);
++    if (targetIndex >= currentIndex) throw new ConflictException('Can only send back to an earlier stage, not the current or a later one');
++
++    const updated = await this.prisma.unit.update({
++      where: { id: unitId },
++      data: { currentWorkflowStageId: targetStage.id },
++      include: { currentWorkflowStage: true },
++    });
++    await this.activityLog.log({
++      unitId,
++      userId: user.sub,
++      action: ActivityAction.WorkflowStageMovedBack,
++      description: `Sent back from ${currentStage.name} to ${targetStage.name} - ${dto.reason}`,
++    });
++    return updated;
++  }
++
+   async setStage(unitId: string, dto: SetStageDto, userId: string) {
+     const [unit, stage] = await Promise.all([
+       this.prisma.unit.findUnique({ where: { id: unitId, deletedAt: null } }),
+@@ -237,13 +281,11 @@ export class WorkflowStagesController {
+   constructor(private readonly service: WorkflowStagesService) {}
+ 
+   @Get('workflow-stages')
+-  @RequirePermissions('config:manage')
+   findAll() {
+     return this.service.findAll();
+   }
+ 
+   @Get('workflow-stages/:id')
+-  @RequirePermissions('config:manage')
+   findOne(@Param('id') id: string) {
+     return this.service.findOne(id);
+   }
+@@ -288,6 +330,11 @@ export class WorkflowStagesController {
+     return this.service.moveBack(id, dto, user);
+   }
+ 
++  @Post('units/:id/workflow/send-back')
++  sendBack(@Param('id') id: string, @Body() dto: SendBackDto, @CurrentUser() user: JwtPayload) {
++    return this.service.sendBack(id, dto, user);
++  }
++
+   @Post('units/:id/workflow/set-stage')
+   @RequirePermissions('config:manage')
+   setStage(@Param('id') id: string, @Body() dto: SetStageDto, @CurrentUser() user: JwtPayload) {
+-- 
+2.43.0
+
+
+From d2f04c8fe5286ef3a2d114e85dfe1ee7ed48f157 Mon Sep 17 00:00:00 2001
+From: Claude <claude@anthropic.com>
+Date: Fri, 17 Jul 2026 11:59:46 +0000
+Subject: [PATCH 2/2] Add Rework and Shipment tracking
+
+Rework: deliberately NOT built on the workflow engine - a completed
+unit is never reopened (this project's own explicit rule), so
+post-shipment rework can't be "move the unit backward." Instead it's
+its own linked record: what's wrong, who's assigned, Open/Completed
+status, notes, completed/reshipped dates. No internal stages of its
+own on purpose - the person doing the fix might be pulled from any
+department, there's no fixed sequence to enforce the way there is for
+normal production. New rework:manage permission, granted to Supervisor.
+
+Shipment: carrier, ship date, truck number, tracking/BOL number,
+driver name, destination-confirmed flag, received-by signature, notes.
+One-to-many per unit (not one-to-one) - a reship after rework gets its
+own new record, not an edited version of the first shipment, so there's
+a real history of every time a unit actually left the building. New
+shipment:manage permission, granted to Supervisor.
+
+Both log to the activity timeline (ReworkCreated/ReworkCompleted/
+ShipmentLogged) and follow the same access pattern as Comments: the
+read-only history is visible to anyone who can view the unit, only the
+create/edit actions are gated behind the respective manage permission -
+found and fixed this during review, since my first pass had gated the
+entire card (including read-only history) behind the manage permission,
+which would've hidden shipment/rework status from anyone without it,
+inconsistent with how every other unit-detail section already works.
+---
+ apps/api/src/app.module.ts                    |   4 +
+ apps/api/src/modules/rework/rework.module.ts  | 130 ++++++++++++
+ .../src/modules/shipment/shipment.module.ts   | 135 +++++++++++++
+ .../src/app/(dashboard)/units/[id]/page.tsx   | 190 +++++++++++++++++-
+ apps/web/src/lib/api.ts                       |  13 ++
+ .../migration.sql                             |  53 +++++
+ prisma/schema.prisma                          |  68 +++++++
+ prisma/seed.ts                                |   3 +
+ 8 files changed, 594 insertions(+), 2 deletions(-)
+ create mode 100644 apps/api/src/modules/rework/rework.module.ts
+ create mode 100644 apps/api/src/modules/shipment/shipment.module.ts
+ create mode 100644 prisma/migrations/20260716180000_add_rework_and_shipment/migration.sql
+
+diff --git a/apps/api/src/app.module.ts b/apps/api/src/app.module.ts
+index e8e6bef..90c262a 100644
+--- a/apps/api/src/app.module.ts
++++ b/apps/api/src/app.module.ts
+@@ -23,6 +23,8 @@ import { VendorPartsModule } from './modules/vendor-parts/vendor-parts.module';
+ import { ActivityLogModule } from './modules/activity-log/activity-log.module';
+ import { OrganizationSettingsModule } from './modules/organization-settings/organization-settings.module';
+ import { WorkflowStagesModule } from './modules/workflow-stages/workflow-stages.module';
++import { ReworkModule } from './modules/rework/rework.module';
++import { ShipmentModule } from './modules/shipment/shipment.module';
+ import { PartsModule } from './modules/parts/parts.module';
+ import { ProductionTasksModule } from './modules/production-tasks/production-tasks.module';
+ import { WorkflowProgressModule } from './modules/workflow-progress/workflow-progress.module';
+@@ -70,6 +72,8 @@ import { ReportsModule } from './modules/reports/reports.module';
+     ActivityLogModule,
+     OrganizationSettingsModule,
+     WorkflowStagesModule,
++    ReworkModule,
++    ShipmentModule,
+     PartsModule,
+ 
+     // ─── Production Task Engine ─────────────────────────────────────────────
+diff --git a/apps/api/src/modules/rework/rework.module.ts b/apps/api/src/modules/rework/rework.module.ts
+new file mode 100644
+index 0000000..1646428
+--- /dev/null
++++ b/apps/api/src/modules/rework/rework.module.ts
+@@ -0,0 +1,130 @@
++import {
++  Injectable, NotFoundException,
++  Controller, Get, Post, Patch,
++  Body, Param, Module,
++} from '@nestjs/common';
++import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
++import { IsString, IsOptional, IsUUID, IsEnum, IsDateString, MaxLength } from 'class-validator';
++import { ReworkStatus, ActivityAction } from '@prisma/client';
++import { PrismaService } from '../../common/prisma/prisma.service';
++import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
++import { CurrentUser } from '../../common/decorators/current-user.decorator';
++import { JwtPayload } from '@hvacflow/shared-types';
++import { ActivityLogModule, ActivityLogService } from '../activity-log/activity-log.module';
++
++// ─── DTOs ─────────────────────────────────────────────────────────────────────
++
++class CreateReworkDto {
++  @IsString() @MaxLength(1000) issue: string;
++  @IsOptional() @IsUUID() assignedToUserId?: string;
++  @IsOptional() @IsString() @MaxLength(2000) notes?: string;
++}
++
++class UpdateReworkDto {
++  @IsOptional() @IsUUID() assignedToUserId?: string;
++  @IsOptional() @IsEnum(ReworkStatus) status?: ReworkStatus;
++  @IsOptional() @IsString() @MaxLength(2000) notes?: string;
++  @IsOptional() @IsDateString() reshippedAt?: string;
++}
++
++// ─── Service ──────────────────────────────────────────────────────────────────
++
++@Injectable()
++export class ReworkService {
++  constructor(
++    private readonly prisma: PrismaService,
++    private readonly activityLog: ActivityLogService,
++  ) {}
++
++  listByUnit(unitId: string) {
++    return this.prisma.unitRework.findMany({
++      where: { unitId },
++      include: {
++        assignedTo: { select: { id: true, name: true } },
++        createdBy: { select: { id: true, name: true } },
++      },
++      orderBy: { createdAt: 'desc' },
++    });
++  }
++
++  async create(unitId: string, dto: CreateReworkDto, userId: string) {
++    const unit = await this.prisma.unit.findUnique({ where: { id: unitId, deletedAt: null } });
++    if (!unit) throw new NotFoundException('Unit not found');
++
++    const rework = await this.prisma.unitRework.create({
++      data: { unitId, issue: dto.issue, assignedToUserId: dto.assignedToUserId, notes: dto.notes, createdByUserId: userId },
++      include: { assignedTo: { select: { id: true, name: true } }, createdBy: { select: { id: true, name: true } } },
++    });
++    await this.activityLog.log({
++      unitId,
++      userId,
++      action: ActivityAction.ReworkCreated,
++      description: `Rework opened: ${dto.issue}`,
++    });
++    return rework;
++  }
++
++  async update(id: string, dto: UpdateReworkDto, userId: string) {
++    const existing = await this.prisma.unitRework.findUnique({ where: { id } });
++    if (!existing) throw new NotFoundException('Rework record not found');
++
++    const justCompleted = dto.status === ReworkStatus.Completed && existing.status !== ReworkStatus.Completed;
++    const updated = await this.prisma.unitRework.update({
++      where: { id },
++      data: {
++        ...(dto.assignedToUserId !== undefined ? { assignedToUserId: dto.assignedToUserId } : {}),
++        ...(dto.status !== undefined ? { status: dto.status } : {}),
++        ...(dto.notes !== undefined ? { notes: dto.notes } : {}),
++        ...(dto.reshippedAt !== undefined ? { reshippedAt: new Date(dto.reshippedAt) } : {}),
++        ...(justCompleted ? { completedAt: new Date() } : {}),
++      },
++      include: { assignedTo: { select: { id: true, name: true } }, createdBy: { select: { id: true, name: true } } },
++    });
++    if (justCompleted) {
++      await this.activityLog.log({
++        unitId: existing.unitId,
++        userId,
++        action: ActivityAction.ReworkCompleted,
++        description: `Rework completed: ${existing.issue}`,
++      });
++    }
++    return updated;
++  }
++}
++
++// ─── Controller ───────────────────────────────────────────────────────────────
++
++@ApiTags('Rework')
++@ApiBearerAuth()
++@Controller()
++export class ReworkController {
++  constructor(private readonly service: ReworkService) {}
++
++  @Get('units/:unitId/reworks')
++  @RequirePermissions('unit:view')
++  listByUnit(@Param('unitId') unitId: string) {
++    return this.service.listByUnit(unitId);
++  }
++
++  @Post('units/:unitId/reworks')
++  @RequirePermissions('rework:manage')
++  create(@Param('unitId') unitId: string, @Body() dto: CreateReworkDto, @CurrentUser() user: JwtPayload) {
++    return this.service.create(unitId, dto, user.sub);
++  }
++
++  @Patch('reworks/:id')
++  @RequirePermissions('rework:manage')
++  update(@Param('id') id: string, @Body() dto: UpdateReworkDto, @CurrentUser() user: JwtPayload) {
++    return this.service.update(id, dto, user.sub);
++  }
++}
++
++// ─── Module ───────────────────────────────────────────────────────────────────
++
++@Module({
++  imports: [ActivityLogModule],
++  controllers: [ReworkController],
++  providers: [ReworkService],
++  exports: [ReworkService],
++})
++export class ReworkModule {}
+diff --git a/apps/api/src/modules/shipment/shipment.module.ts b/apps/api/src/modules/shipment/shipment.module.ts
+new file mode 100644
+index 0000000..77145d4
+--- /dev/null
++++ b/apps/api/src/modules/shipment/shipment.module.ts
+@@ -0,0 +1,135 @@
++import {
++  Injectable, NotFoundException,
++  Controller, Get, Post, Patch,
++  Body, Param, Module,
++} from '@nestjs/common';
++import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
++import { IsString, IsOptional, IsBoolean, IsDateString, MaxLength } from 'class-validator';
++import { ActivityAction } from '@prisma/client';
++import { PrismaService } from '../../common/prisma/prisma.service';
++import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
++import { CurrentUser } from '../../common/decorators/current-user.decorator';
++import { JwtPayload } from '@hvacflow/shared-types';
++import { ActivityLogModule, ActivityLogService } from '../activity-log/activity-log.module';
++
++// ─── DTOs ─────────────────────────────────────────────────────────────────────
++// Every field is optional except which unit it's for - a shipping
++// person might fill this in over several visits (log the truck number
++// now, come back and add the signed proof-of-delivery once it's
++// actually received), not all at once in a single form.
++
++class CreateShipmentDto {
++  @IsOptional() @IsString() @MaxLength(200) carrierName?: string;
++  @IsOptional() @IsDateString() shipDate?: string;
++  @IsOptional() @IsString() @MaxLength(100) truckNumber?: string;
++  @IsOptional() @IsString() @MaxLength(100) trackingNumber?: string;
++  @IsOptional() @IsString() @MaxLength(200) driverName?: string;
++  @IsOptional() @IsBoolean() destinationConfirmed?: boolean;
++  @IsOptional() @IsString() @MaxLength(200) receivedBySignature?: string;
++  @IsOptional() @IsString() @MaxLength(2000) notes?: string;
++}
++
++class UpdateShipmentDto extends CreateShipmentDto {}
++
++// ─── Service ──────────────────────────────────────────────────────────────────
++
++@Injectable()
++export class ShipmentService {
++  constructor(
++    private readonly prisma: PrismaService,
++    private readonly activityLog: ActivityLogService,
++  ) {}
++
++  listByUnit(unitId: string) {
++    return this.prisma.shipmentRecord.findMany({
++      where: { unitId },
++      include: { createdBy: { select: { id: true, name: true } } },
++      orderBy: { createdAt: 'desc' },
++    });
++  }
++
++  async create(unitId: string, dto: CreateShipmentDto, userId: string) {
++    const unit = await this.prisma.unit.findUnique({ where: { id: unitId, deletedAt: null } });
++    if (!unit) throw new NotFoundException('Unit not found');
++
++    const shipment = await this.prisma.shipmentRecord.create({
++      data: {
++        unitId,
++        carrierName: dto.carrierName,
++        shipDate: dto.shipDate ? new Date(dto.shipDate) : undefined,
++        truckNumber: dto.truckNumber,
++        trackingNumber: dto.trackingNumber,
++        driverName: dto.driverName,
++        destinationConfirmed: dto.destinationConfirmed ?? false,
++        receivedBySignature: dto.receivedBySignature,
++        notes: dto.notes,
++        createdByUserId: userId,
++      },
++      include: { createdBy: { select: { id: true, name: true } } },
++    });
++    await this.activityLog.log({
++      unitId,
++      userId,
++      action: ActivityAction.ShipmentLogged,
++      description: `Shipment logged${dto.carrierName ? ` - ${dto.carrierName}` : ''}${dto.truckNumber ? `, truck ${dto.truckNumber}` : ''}`,
++    });
++    return shipment;
++  }
++
++  async update(id: string, dto: UpdateShipmentDto) {
++    const existing = await this.prisma.shipmentRecord.findUnique({ where: { id } });
++    if (!existing) throw new NotFoundException('Shipment record not found');
++
++    return this.prisma.shipmentRecord.update({
++      where: { id },
++      data: {
++        ...(dto.carrierName !== undefined ? { carrierName: dto.carrierName } : {}),
++        ...(dto.shipDate !== undefined ? { shipDate: new Date(dto.shipDate) } : {}),
++        ...(dto.truckNumber !== undefined ? { truckNumber: dto.truckNumber } : {}),
++        ...(dto.trackingNumber !== undefined ? { trackingNumber: dto.trackingNumber } : {}),
++        ...(dto.driverName !== undefined ? { driverName: dto.driverName } : {}),
++        ...(dto.destinationConfirmed !== undefined ? { destinationConfirmed: dto.destinationConfirmed } : {}),
++        ...(dto.receivedBySignature !== undefined ? { receivedBySignature: dto.receivedBySignature } : {}),
++        ...(dto.notes !== undefined ? { notes: dto.notes } : {}),
++      },
++      include: { createdBy: { select: { id: true, name: true } } },
++    });
++  }
++}
++
++// ─── Controller ───────────────────────────────────────────────────────────────
++
++@ApiTags('Shipments')
++@ApiBearerAuth()
++@Controller()
++export class ShipmentController {
++  constructor(private readonly service: ShipmentService) {}
++
++  @Get('units/:unitId/shipments')
++  @RequirePermissions('unit:view')
++  listByUnit(@Param('unitId') unitId: string) {
++    return this.service.listByUnit(unitId);
++  }
++
++  @Post('units/:unitId/shipments')
++  @RequirePermissions('shipment:manage')
++  create(@Param('unitId') unitId: string, @Body() dto: CreateShipmentDto, @CurrentUser() user: JwtPayload) {
++    return this.service.create(unitId, dto, user.sub);
++  }
++
++  @Patch('shipments/:id')
++  @RequirePermissions('shipment:manage')
++  update(@Param('id') id: string, @Body() dto: UpdateShipmentDto) {
++    return this.service.update(id, dto);
++  }
++}
++
++// ─── Module ───────────────────────────────────────────────────────────────────
++
++@Module({
++  imports: [ActivityLogModule],
++  controllers: [ShipmentController],
++  providers: [ShipmentService],
++  exports: [ShipmentService],
++})
++export class ShipmentModule {}
+diff --git a/apps/web/src/app/(dashboard)/units/[id]/page.tsx b/apps/web/src/app/(dashboard)/units/[id]/page.tsx
+index 8bcbe68..ecc423b 100644
+--- a/apps/web/src/app/(dashboard)/units/[id]/page.tsx
++++ b/apps/web/src/app/(dashboard)/units/[id]/page.tsx
+@@ -6,7 +6,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+ import { api } from '@/lib/api';
+ import { useAuthStore } from '@/store/auth.store';
+ import { PageHeader, Button, EmptyState, Spinner, Modal, Input, Select, Card, ProgressBar, Textarea, Badge } from '@/components/shared';
+-import { Plus, Package, ChevronRight, CheckCircle, Circle, Clock, AlertCircle, ExternalLink, MessageSquare, AlertTriangle, History, Workflow } from 'lucide-react';
++import { Plus, Package, ChevronRight, CheckCircle, Circle, Clock, AlertCircle, ExternalLink, MessageSquare, AlertTriangle, History, Workflow, Wrench, Truck } from 'lucide-react';
+ import Link from 'next/link';
+ import { toast } from '@/components/shared';
+ import { cn, PART_STATUS_BG, STATUS_BG, STATUS_LABELS } from '@/lib/utils';
+@@ -38,6 +38,61 @@ export default function UnitDetailPage() {
+     queryFn: () => api.units.activity(id),
+   });
+ 
++  const { data: reworks = [] } = useQuery({
++    queryKey: ['unit', id, 'reworks'],
++    queryFn: () => api.reworks.listByUnit(id),
++  });
++  const { data: shipments = [] } = useQuery({
++    queryKey: ['unit', id, 'shipments'],
++    queryFn: () => api.shipments.listByUnit(id),
++  });
++  const { data: allUsers = [] } = useQuery({
++    queryKey: ['users'],
++    queryFn: () => api.users.list(),
++    enabled: hasPermission('rework:manage'),
++    staleTime: 60_000,
++  });
++
++  const [reworkIssue, setReworkIssue] = useState('');
++  const [reworkAssignee, setReworkAssignee] = useState('');
++  const createReworkMutation = useMutation({
++    mutationFn: () => api.reworks.create(id, { issue: reworkIssue, assignedToUserId: reworkAssignee || undefined }),
++    onSuccess: () => {
++      queryClient.invalidateQueries({ queryKey: ['unit', id] });
++      setReworkIssue('');
++      setReworkAssignee('');
++      toast('Rework opened', 'success');
++    },
++    onError: (err: any) => toast(err.message, 'error'),
++  });
++  const updateReworkMutation = useMutation({
++    mutationFn: ({ reworkId, body }: { reworkId: string; body: any }) => api.reworks.update(reworkId, body),
++    onSuccess: () => {
++      queryClient.invalidateQueries({ queryKey: ['unit', id] });
++      toast('Rework updated', 'success');
++    },
++    onError: (err: any) => toast(err.message, 'error'),
++  });
++
++  const [shipForm, setShipForm] = useState({ carrierName: '', shipDate: '', truckNumber: '', trackingNumber: '', driverName: '', notes: '' });
++  const createShipmentMutation = useMutation({
++    mutationFn: () => api.shipments.create(id, { ...shipForm, shipDate: shipForm.shipDate || undefined }),
++    onSuccess: () => {
++      queryClient.invalidateQueries({ queryKey: ['unit', id] });
++      setShipForm({ carrierName: '', shipDate: '', truckNumber: '', trackingNumber: '', driverName: '', notes: '' });
++      toast('Shipment logged', 'success');
++    },
++    onError: (err: any) => toast(err.message, 'error'),
++  });
++  const updateShipmentMutation = useMutation({
++    mutationFn: ({ shipmentId, body }: { shipmentId: string; body: any }) => api.shipments.update(shipmentId, body),
++    onSuccess: () => {
++      queryClient.invalidateQueries({ queryKey: ['unit', id] });
++      toast('Shipment updated', 'success');
++    },
++    onError: (err: any) => toast(err.message, 'error'),
++  });
++
+   const { data: partTypes } = useQuery({
+     queryKey: ['part-types'],
+     queryFn: () => api.partTypes.list({ isActive: true }),
+@@ -72,7 +127,6 @@ export default function UnitDetailPage() {
+   const { data: workflowStages = [] } = useQuery({
+     queryKey: ['workflow-stages'],
+     queryFn: () => api.workflowStages.list(),
+-    enabled: hasPermission('config:manage'),
+   });
+   const workflowAdvanceMutation = useMutation({
+     mutationFn: () => api.units.workflowAdvance(id),
+@@ -90,6 +144,18 @@ export default function UnitDetailPage() {
+     },
+     onError: (err: any) => toast(err.message, 'error'),
+   });
++  const [sendBackStageId, setSendBackStageId] = useState('');
++  const [sendBackReason, setSendBackReason] = useState('');
++  const workflowSendBackMutation = useMutation({
++    mutationFn: () => api.units.workflowSendBack(id, sendBackStageId, sendBackReason),
++    onSuccess: (updated: any) => {
++      queryClient.invalidateQueries({ queryKey: ['unit', id] });
++      setSendBackStageId('');
++      setSendBackReason('');
++      toast(`Sent back to ${updated.currentWorkflowStage?.name}`, 'success');
++    },
++    onError: (err: any) => toast(err.message, 'error'),
++  });
+   const [setStageId, setSetStageId] = useState('');
+   const workflowSetStageMutation = useMutation({
+     mutationFn: () => api.units.workflowSetStage(id, setStageId),
+@@ -230,6 +296,36 @@ export default function UnitDetailPage() {
+                 Move Back
+               </Button>
+             </div>
++
++            {/* QC-style: send to any earlier stage with a required
++                reason, not just one step back. */}
++            <div className="pt-3 border-t border-border mb-3">
++              <p className="text-xs text-muted-foreground mb-2">Send back to a specific department (e.g. QC sending it back to Fabrication)</p>
++              <div className="space-y-2">
++                <Select
++                  value={sendBackStageId}
++                  onChange={(e) => setSendBackStageId(e.target.value)}
++                  options={(workflowStages as any[])
++                    .filter((s: any) => s.id !== unit.currentWorkflowStageId)
++                    .map((s: any) => ({ value: s.id, label: s.name }))}
++                  placeholder="Select a department to send back to"
++                />
++                <Textarea
++                  placeholder="Reason (required) - what needs fixing"
++                  value={sendBackReason}
++                  onChange={(e) => setSendBackReason(e.target.value)}
++                  rows={2}
++                />
++                <Button
++                  size="sm" variant="secondary" className="w-full"
++                  disabled={!sendBackStageId || !sendBackReason.trim()}
++                  loading={workflowSendBackMutation.isPending}
++                  onClick={() => workflowSendBackMutation.mutate()}
++                >
++                  Send Back
++                </Button>
++              </div>
++            </div>
+             {hasPermission('config:manage') && (
+               <div className="pt-3 border-t border-border">
+                 <p className="text-xs text-muted-foreground mb-2">Admin override - jump directly to any stage</p>
+@@ -249,6 +345,96 @@ export default function UnitDetailPage() {
+             )}
+           </Card>
+ 
++          {(hasPermission('rework:manage') || reworks.length > 0) && (
++            <Card className="p-4">
++              <div className="flex items-center gap-2 mb-1"><Wrench className="w-4 h-4" /><h2 className="text-sm font-semibold">Rework</h2></div>
++              <p className="text-xs text-muted-foreground mb-4">Separate from the pipeline above - the unit's own completion is never reopened. This is a linked record for post-completion fixes.</p>
++
++              {hasPermission('rework:manage') && (
++                <div className="space-y-2 mb-4">
++                  <Textarea placeholder="What's wrong / customer complaint" value={reworkIssue} onChange={(e) => setReworkIssue(e.target.value)} rows={2} />
++                  <div className="flex gap-2">
++                    <Select
++                      value={reworkAssignee}
++                      onChange={(e) => setReworkAssignee(e.target.value)}
++                      options={(allUsers as any[]).map((u: any) => ({ value: u.id, label: u.name }))}
++                      placeholder="Assign to (optional)"
++                      className="flex-1"
++                    />
++                    <Button size="sm" disabled={!reworkIssue.trim()} loading={createReworkMutation.isPending} onClick={() => createReworkMutation.mutate()}>
++                      Open Rework
++                    </Button>
++                  </div>
++                </div>
++              )}
++
++              {reworks.length === 0 ? (
++                <p className="text-xs text-muted-foreground">No rework records.</p>
++              ) : (
++                <div className="space-y-2">
++                  {(reworks as any[]).map((r: any) => (
++                    <div key={r.id} className={cn('rounded-md border p-3', r.status === 'Open' ? 'border-amber-500/40 bg-amber-500/5' : 'border-border')}>
++                      <div className="flex items-center justify-between gap-2 mb-1">
++                        <Badge variant={r.status === 'Open' ? 'default' : 'muted'}>{r.status}</Badge>
++                        <span className="text-xs text-muted-foreground">{new Date(r.createdAt).toLocaleDateString()}</span>
++                      </div>
++                      <p className="text-sm">{r.issue}</p>
++                      {r.assignedTo && <p className="text-xs text-muted-foreground mt-1">Assigned to {r.assignedTo.name}</p>}
++                      {r.status === 'Open' && hasPermission('rework:manage') && (
++                        <Button size="sm" variant="secondary" className="mt-2" loading={updateReworkMutation.isPending} onClick={() => updateReworkMutation.mutate({ reworkId: r.id, body: { status: 'Completed' } })}>
++                          Mark Rework Completed
++                        </Button>
++                      )}
++                      {r.completedAt && <p className="text-xs text-muted-foreground mt-1">Completed {new Date(r.completedAt).toLocaleDateString()}</p>}
++                    </div>
++                  ))}
++                </div>
++              )}
++            </Card>
++          )}
++
++          {(hasPermission('shipment:manage') || shipments.length > 0) && (
++            <Card className="p-4">
++              <div className="flex items-center gap-2 mb-4"><Truck className="w-4 h-4" /><h2 className="text-sm font-semibold">Shipping</h2></div>
++              {hasPermission('shipment:manage') && (
++                <>
++                  <div className="grid grid-cols-2 gap-2 mb-3">
++                    <Input label="Carrier" value={shipForm.carrierName} onChange={(e) => setShipForm((f) => ({ ...f, carrierName: e.target.value }))} placeholder="e.g. XPO Logistics" />
++                    <Input label="Ship date" type="date" value={shipForm.shipDate} onChange={(e) => setShipForm((f) => ({ ...f, shipDate: e.target.value }))} />
++                    <Input label="Truck #" value={shipForm.truckNumber} onChange={(e) => setShipForm((f) => ({ ...f, truckNumber: e.target.value }))} />
++                    <Input label="Tracking / BOL #" value={shipForm.trackingNumber} onChange={(e) => setShipForm((f) => ({ ...f, trackingNumber: e.target.value }))} />
++                    <Input label="Driver" value={shipForm.driverName} onChange={(e) => setShipForm((f) => ({ ...f, driverName: e.target.value }))} className="col-span-2" />
++                  </div>
++                  <Textarea placeholder="Notes" value={shipForm.notes} onChange={(e) => setShipForm((f) => ({ ...f, notes: e.target.value }))} rows={2} />
++                  <Button size="sm" className="mt-2 w-full" loading={createShipmentMutation.isPending} onClick={() => createShipmentMutation.mutate()}>
++                    Log Shipment
++                  </Button>
++                </>
++              )}
++
++              {shipments.length > 0 && (
++                <div className="mt-4 space-y-2">
++                  {(shipments as any[]).map((s: any) => (
++                    <div key={s.id} className="rounded-md border border-border p-3 text-sm space-y-1">
++                      <div className="flex items-center justify-between">
++                        <span className="font-medium">{s.carrierName ?? 'Carrier not set'}</span>
++                        <span className="text-xs text-muted-foreground">{s.shipDate ? new Date(s.shipDate).toLocaleDateString() : 'No date'}</span>
++                      </div>
++                      {s.truckNumber && <p className="text-xs text-muted-foreground">Truck {s.truckNumber}</p>}
++                      {s.trackingNumber && <p className="text-xs text-muted-foreground">Tracking/BOL {s.trackingNumber}</p>}
++                      {s.driverName && <p className="text-xs text-muted-foreground">Driver: {s.driverName}</p>}
++                      {!s.destinationConfirmed && hasPermission('shipment:manage') && (
++                        <Button size="sm" variant="secondary" onClick={() => updateShipmentMutation.mutate({ shipmentId: s.id, body: { destinationConfirmed: true } })}>
++                          Confirm destination
++                        </Button>
++                      )}
++                    </div>
++                  ))}
++                </div>
++              )}
++            </Card>
++          )}
++
+           <Card className="p-4">
+             <div className="flex items-center gap-2 mb-4"><History className="w-4 h-4" /><h2 className="text-sm font-semibold">Activity timeline</h2></div>
+             {activity.length === 0 ? (
+diff --git a/apps/web/src/lib/api.ts b/apps/web/src/lib/api.ts
+index 908f6e0..53e2235 100644
+--- a/apps/web/src/lib/api.ts
++++ b/apps/web/src/lib/api.ts
+@@ -335,6 +335,7 @@ export const api = {
+     startAssembly: (id: string, teamName: string) => api.post<any>(`/units/${id}/start-assembly`, { teamName }),
+     workflowAdvance: (id: string) => api.post<any>(`/units/${id}/workflow/advance`, {}),
+     workflowMoveBack: (id: string, reason?: string) => api.post<any>(`/units/${id}/workflow/move-back`, { reason }),
++    workflowSendBack: (id: string, targetStageId: string, reason: string) => api.post<any>(`/units/${id}/workflow/send-back`, { targetStageId, reason }),
+     workflowSetStage: (id: string, stageId: string) => api.post<any>(`/units/${id}/workflow/set-stage`, { stageId }),
+     listByOrder: (orderId: string, params?: any) =>
+       api.get<any>(`/orders/${orderId}/units`, { params }),
+@@ -363,6 +364,18 @@ export const api = {
+     replaceRoute: (id: string, processDefinitionIds: string[], reason: string) => api.patch<any>(`/parts/${id}/route`, { processDefinitionIds, reason }),
+   },
+ 
++  reworks: {
++    listByUnit: (unitId: string) => api.get<any[]>(`/units/${unitId}/reworks`),
++    create: (unitId: string, body: any) => api.post<any>(`/units/${unitId}/reworks`, body),
++    update: (id: string, body: any) => api.patch<any>(`/reworks/${id}`, body),
++  },
++
++  shipments: {
++    listByUnit: (unitId: string) => api.get<any[]>(`/units/${unitId}/shipments`),
++    create: (unitId: string, body: any) => api.post<any>(`/units/${unitId}/shipments`, body),
++    update: (id: string, body: any) => api.patch<any>(`/shipments/${id}`, body),
++  },
++
+   vendorParts: {
+     listByUnit: (unitId: string) => api.get<any[]>(`/units/${unitId}/vendor-parts`),
+     create: (unitId: string, body: { partTypeId: string; isReceived: boolean; expectedArrivalDate?: string; receivedDate?: string }) =>
+diff --git a/prisma/migrations/20260716180000_add_rework_and_shipment/migration.sql b/prisma/migrations/20260716180000_add_rework_and_shipment/migration.sql
+new file mode 100644
+index 0000000..51a0f9d
+--- /dev/null
++++ b/prisma/migrations/20260716180000_add_rework_and_shipment/migration.sql
+@@ -0,0 +1,53 @@
++-- Rework: separate from the workflow engine on purpose - a completed
++-- unit is never reopened, so this is its own linked record, not a
++-- reversal of the unit's own state.
++CREATE TYPE "ReworkStatus" AS ENUM ('Open', 'Completed');
++
++ALTER TYPE "ActivityAction" ADD VALUE 'ReworkCreated';
++ALTER TYPE "ActivityAction" ADD VALUE 'ReworkCompleted';
++ALTER TYPE "ActivityAction" ADD VALUE 'ShipmentLogged';
++
++CREATE TABLE "unit_reworks" (
++  "id" TEXT NOT NULL,
++  "unitId" TEXT NOT NULL,
++  "issue" TEXT NOT NULL,
++  "assignedToUserId" TEXT,
++  "status" "ReworkStatus" NOT NULL DEFAULT 'Open',
++  "notes" TEXT,
++  "completedAt" TIMESTAMP(3),
++  "reshippedAt" TIMESTAMP(3),
++  "createdByUserId" TEXT NOT NULL,
++  "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
++  "updatedAt" TIMESTAMP(3) NOT NULL,
++  CONSTRAINT "unit_reworks_pkey" PRIMARY KEY ("id")
++);
++
++CREATE INDEX "unit_reworks_unitId_idx" ON "unit_reworks"("unitId");
++
++ALTER TABLE "unit_reworks" ADD CONSTRAINT "unit_reworks_unitId_fkey" FOREIGN KEY ("unitId") REFERENCES "units"("id") ON DELETE CASCADE ON UPDATE CASCADE;
++ALTER TABLE "unit_reworks" ADD CONSTRAINT "unit_reworks_assignedToUserId_fkey" FOREIGN KEY ("assignedToUserId") REFERENCES "users"("id") ON DELETE SET NULL ON UPDATE CASCADE;
++ALTER TABLE "unit_reworks" ADD CONSTRAINT "unit_reworks_createdByUserId_fkey" FOREIGN KEY ("createdByUserId") REFERENCES "users"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
++
++-- Shipment records: one-to-many per unit (reship after rework gets its
++-- own new record, not an edit of the first shipment).
++CREATE TABLE "shipment_records" (
++  "id" TEXT NOT NULL,
++  "unitId" TEXT NOT NULL,
++  "carrierName" TEXT,
++  "shipDate" TIMESTAMP(3),
++  "truckNumber" TEXT,
++  "trackingNumber" TEXT,
++  "driverName" TEXT,
++  "destinationConfirmed" BOOLEAN NOT NULL DEFAULT false,
++  "receivedBySignature" TEXT,
++  "notes" TEXT,
++  "createdByUserId" TEXT NOT NULL,
++  "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
++  "updatedAt" TIMESTAMP(3) NOT NULL,
++  CONSTRAINT "shipment_records_pkey" PRIMARY KEY ("id")
++);
++
++CREATE INDEX "shipment_records_unitId_idx" ON "shipment_records"("unitId");
++
++ALTER TABLE "shipment_records" ADD CONSTRAINT "shipment_records_unitId_fkey" FOREIGN KEY ("unitId") REFERENCES "units"("id") ON DELETE CASCADE ON UPDATE CASCADE;
++ALTER TABLE "shipment_records" ADD CONSTRAINT "shipment_records_createdByUserId_fkey" FOREIGN KEY ("createdByUserId") REFERENCES "users"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+diff --git a/prisma/schema.prisma b/prisma/schema.prisma
+index e79580b..1653d64 100644
+--- a/prisma/schema.prisma
++++ b/prisma/schema.prisma
+@@ -117,6 +117,9 @@ model User {
+   unitComments            UnitComment[]
+   vendorParts             VendorPart[]
+   activityLogs            ActivityLog[]
++  reworkAssigned          UnitRework[] @relation("ReworkAssignedTo")
++  reworkCreated           UnitRework[] @relation("ReworkCreatedBy")
++  shipmentsCreated        ShipmentRecord[]
+ 
+   @@map("users")
+ }
+@@ -362,6 +365,8 @@ model Unit {
+   comments          UnitComment[]
+   vendorParts       VendorPart[]
+   activityLogs      ActivityLog[]
++  reworks           UnitRework[]
++  shipments         ShipmentRecord[]
+   currentWorkflowStage WorkflowStage? @relation("UnitWorkflowStage", fields: [currentWorkflowStageId], references: [id], onDelete: SetNull)
+ 
+   @@index([orderId])
+@@ -398,6 +403,9 @@ enum ActivityAction {
+   WorkflowStageAdvanced
+   WorkflowStageMovedBack
+   WorkflowStageSet
++  ReworkCreated
++  ReworkCompleted
++  ShipmentLogged
+ }
+ 
+ model ActivityLog {
+@@ -437,6 +445,66 @@ model UnitComment {
+ // dates. Added either by a Purchasing user (drag-drop from the vendor
+ // part-type palette) or by Assembly directly if the Purchasing
+ // department is toggled off.
++enum ReworkStatus {
++  Open
++  Completed
++}
++
++// Deliberately separate from WorkflowStage/currentWorkflowStageId - a
++// completed unit is never reopened (per this project's own rule), so
++// post-shipment rework can't be "move the unit backward." Instead it's
++// its own simple record linked to the original unit: what's wrong, who's
++// fixing it, done or not, when it went back out. No internal stages of
++// its own - the person handling it might be pulled from any department,
++// there's no fixed sequence to enforce here the way there is for normal
++// production.
++model UnitRework {
++  id                String       @id @default(uuid())
++  unitId            String
++  issue             String
++  assignedToUserId  String?
++  status            ReworkStatus @default(Open)
++  notes             String?
++  completedAt       DateTime?
++  reshippedAt       DateTime?
++  createdByUserId   String
++  createdAt         DateTime     @default(now())
++  updatedAt         DateTime     @updatedAt
++
++  unit        Unit  @relation(fields: [unitId], references: [id], onDelete: Cascade)
++  assignedTo  User? @relation("ReworkAssignedTo", fields: [assignedToUserId], references: [id])
++  createdBy   User  @relation("ReworkCreatedBy", fields: [createdByUserId], references: [id])
++
++  @@index([unitId])
++  @@map("unit_reworks")
++}
++
++// One-to-many rather than one-to-one - a unit that goes through Rework
++// after its first shipment gets a second ShipmentRecord for the
++// reship, not an edited version of the first. Keeps a real history of
++// every time this unit actually left the building.
++model ShipmentRecord {
++  id                   String    @id @default(uuid())
++  unitId               String
++  carrierName          String?
++  shipDate             DateTime?
++  truckNumber          String?
++  trackingNumber       String? // BOL / freight reference number
++  driverName           String?
++  destinationConfirmed Boolean   @default(false)
++  receivedBySignature  String?
++  notes                String?
++  createdByUserId      String
++  createdAt            DateTime  @default(now())
++  updatedAt            DateTime  @updatedAt
++
++  unit      Unit @relation(fields: [unitId], references: [id], onDelete: Cascade)
++  createdBy User @relation(fields: [createdByUserId], references: [id])
++
++  @@index([unitId])
++  @@map("shipment_records")
++}
++
+ model VendorPart {
+   id                  String    @id @default(uuid())
+   unitId              String
+diff --git a/prisma/seed.ts b/prisma/seed.ts
+index 58ea9ce..f03a5a1 100644
+--- a/prisma/seed.ts
++++ b/prisma/seed.ts
+@@ -42,6 +42,8 @@ async function main() {
+     { code: 'unit:manage', category: 'Units', description: 'Create and edit units' },
+     { code: 'unit:plan', category: 'Units', description: 'Assign parts to a unit and release it to the Production Manager' },
+     { code: 'vendor-part:manage', category: 'Units', description: 'Track vendor-supplied parts on a unit (received status, arrival dates)' },
++    { code: 'rework:manage', category: 'Units', description: 'Create and update rework records for completed units' },
++    { code: 'shipment:manage', category: 'Units', description: 'Log shipment/carrier details for a unit' },
+     { code: 'part:view', category: 'Parts', description: 'View parts' },
+     { code: 'part:manage', category: 'Parts', description: 'Create and edit parts' },
+     // Configuration
+@@ -148,6 +150,7 @@ async function main() {
+     'task:hold', 'task:reject', 'task:reassign',
+     'customer:view', 'project:view', 'order:view', 'order:manage',
+     'unit:view', 'unit:manage', 'part:view', 'part:manage', 'vendor-part:manage',
++    'rework:manage', 'shipment:manage',
+     'user:view', 'role:view', 'report:view', 'dashboard:configure',
+     'department:view', 'process:view', 'machine:view',
+   ];
+-- 
+2.43.0
+

@@ -1,0 +1,1731 @@
+From be83088cca7f354bbbd2b42942d4e5de62123a42 Mon Sep 17 00:00:00 2001
+From: Claude <claude@anthropic.com>
+Date: Thu, 16 Jul 2026 12:26:15 +0000
+Subject: [PATCH 1/7] Rename Engineering department to Detailing
+
+Same department (code ENG unchanged), just the display name - so this
+is a pure data change via db:seed, no migration needed. Also updated
+the two hardcoded 'Engineering' fallback labels used for a unit's
+currentStage before it's assigned to an actual department, so they
+say 'Detailing' too instead of creating a mismatch with the renamed
+department.
+
+NOT renamed, flagging for confirmation rather than guessing: the
+separate "Engineering Dashboard" page/workflow (EngineeringStatus enum,
+the Submittal/Design/Drawings/Programming sequential approval steps).
+That's a distinct concept from the department itself - a much bigger
+change (schema enum, migration, several UI surfaces) that wasn't
+explicitly requested. Say the word if you want that renamed too.
+
+Note on the previous reorder: the sidebar order you asked for
+(Purchasing, Engineering, Fabrication, Assembly, Piping, Electrical,
+Painting, Testing, Shipping) was already correctly sitting in seed.ts
+from the last patch - the screenshot showing the old order strongly
+suggests db:seed was never re-run after applying it. A git patch only
+changes the seed script's source code; it doesn't touch the live
+database until the script actually executes. Re-running db:seed now
+will apply both the already-pending reorder and this rename together.
+---
+ apps/api/src/modules/units/units.service.ts              | 4 ++--
+ apps/web/src/app/(dashboard)/director-dashboard/page.tsx | 2 +-
+ prisma/seed.ts                                           | 2 +-
+ 3 files changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/apps/api/src/modules/units/units.service.ts b/apps/api/src/modules/units/units.service.ts
+index fcc624b..9f876ae 100644
+--- a/apps/api/src/modules/units/units.service.ts
++++ b/apps/api/src/modules/units/units.service.ts
+@@ -277,7 +277,7 @@ export class UnitsService {
+     if (!unitType) throw new NotFoundException('Unit type not found');
+     const composition = await this.prisma.unitTypeComposition.findMany({ where: { unitTypeId: dto.unitTypeId, isActive: true }, orderBy: { sortOrder: 'asc' } });
+     const unit = await this.prisma.$transaction(async (tx) => {
+-      const newUnit = await tx.unit.create({ data: { unitTypeId: dto.unitTypeId, serialNumber: dto.serialNumber, displayName: dto.displayName, priorityLevelId: priority.id, productionMonth: this.monthValue(dto.productionMonth), dueDate: dto.dueDate ? new Date(dto.dueDate) : undefined, priorityPosition: dto.priorityPosition ?? 0, oneDriveFolderUrl: dto.oneDriveFolderUrl, specifications: dto.specifications as Prisma.InputJsonValue | undefined, currentStage: 'Engineering', createdByUserId: userId } });
++      const newUnit = await tx.unit.create({ data: { unitTypeId: dto.unitTypeId, serialNumber: dto.serialNumber, displayName: dto.displayName, priorityLevelId: priority.id, productionMonth: this.monthValue(dto.productionMonth), dueDate: dto.dueDate ? new Date(dto.dueDate) : undefined, priorityPosition: dto.priorityPosition ?? 0, oneDriveFolderUrl: dto.oneDriveFolderUrl, specifications: dto.specifications as Prisma.InputJsonValue | undefined, currentStage: 'Detailing', createdByUserId: userId } });
+       for (const comp of composition.filter((c) => !c.isOptional)) await this.createPartWithTasks(tx, newUnit.id, comp.partTypeId, comp.defaultQuantity, priority.id, userId);
+       return newUnit;
+     });
+@@ -303,7 +303,7 @@ export class UnitsService {
+     const currentIndex = ENGINEERING_SEQUENCE.indexOf(unit.engineeringStatus);
+     if (currentIndex < 0 || currentIndex === ENGINEERING_SEQUENCE.length - 1) throw new ConflictException('Engineering workflow is already complete');
+     const next = ENGINEERING_SEQUENCE[currentIndex + 1];
+-    return this.prisma.unit.update({ where: { id }, data: { engineeringStatus: next, currentStage: next === EngineeringStatus.ReleasedToManufacturing ? 'Awaiting production release' : 'Engineering' }, include: this.unitSummaryInclude() });
++    return this.prisma.unit.update({ where: { id }, data: { engineeringStatus: next, currentStage: next === EngineeringStatus.ReleasedToManufacturing ? 'Awaiting production release' : 'Detailing' }, include: this.unitSummaryInclude() });
+   }
+ 
+   // Planner's queue: engineering-released units that haven't been marked
+diff --git a/apps/web/src/app/(dashboard)/director-dashboard/page.tsx b/apps/web/src/app/(dashboard)/director-dashboard/page.tsx
+index 88aecb1..3b827af 100644
+--- a/apps/web/src/app/(dashboard)/director-dashboard/page.tsx
++++ b/apps/web/src/app/(dashboard)/director-dashboard/page.tsx
+@@ -98,7 +98,7 @@ function UnitListCard({ title, description, units }: { title: string; descriptio
+                 <div className={cn('w-2 h-10 rounded-full', unit.isBlocked ? 'bg-red-500' : overdue ? 'bg-amber-500' : 'bg-blue-500')} />
+                 <div className="flex-1 min-w-0">
+                   <div className="flex items-center gap-2"><span className="font-medium text-sm">{unit.serialNumber}</span><Badge variant="outline">{unit.unitType?.code}</Badge>{unit.isBlocked && <Badge className="bg-red-500/10 text-red-400">Blocked</Badge>}</div>
+-                  <p className="text-xs text-muted-foreground truncate mt-0.5">{unit.holdReason || unit.currentStage || unit.currentDepartment?.name || 'Engineering'}</p>
++                  <p className="text-xs text-muted-foreground truncate mt-0.5">{unit.holdReason || unit.currentStage || unit.currentDepartment?.name || 'Detailing'}</p>
+                   {unit.latestDelayComment && (
+                     <p className="text-xs text-amber-500 truncate mt-0.5 flex items-center gap-1">
+                       <AlertTriangle className="w-3 h-3 flex-shrink-0" />
+diff --git a/prisma/seed.ts b/prisma/seed.ts
+index 83d251e..58ea9ce 100644
+--- a/prisma/seed.ts
++++ b/prisma/seed.ts
+@@ -254,7 +254,7 @@ async function main() {
+ 
+   const departmentData = [
+     { name: 'Purchasing', code: 'PURCH', color: '#f59e0b', sortOrder: 1 },
+-    { name: 'Engineering', code: 'ENG', color: '#0ea5e9', sortOrder: 2 },
++    { name: 'Detailing', code: 'ENG', color: '#0ea5e9', sortOrder: 2 },
+     { name: 'Fabrication', code: 'FAB', color: '#6366f1', sortOrder: 3 },
+     { name: 'Assembly', code: 'ASSY', color: '#10b981', sortOrder: 4 },
+     { name: 'Piping', code: 'PIPE', color: '#06b6d4', sortOrder: 5 },
+-- 
+2.43.0
+
+
+From d941f61dd5aa6feaed0012f4595ee3d0b33ffbc1 Mon Sep 17 00:00:00 2001
+From: Claude <claude@anthropic.com>
+Date: Thu, 16 Jul 2026 14:45:01 +0000
+Subject: [PATCH 2/7] Item 1: Detailing/Engineering stage progress now visible
+ on department boards
+
+Root cause: Engineering's approval stages (Submittal Received, Design
+Completed, etc.) are tracked entirely on Unit.engineeringStatus - there
+was never a real ProductionTask behind them, since there's no process
+route for a department that doesn't fabricate anything. That meant
+clicking "Mark Submittal Received" on the Engineering Dashboard did
+something real, but it was structurally invisible everywhere else -
+the Detailing department's column on Shop Floor and Supervisor
+Dashboard was always empty, full stop.
+
+Rather than restructure the whole engineering workflow into the task
+system (a much bigger, riskier change touching a working page), added
+synthesized read-only entries: any unit currently between
+SubmittalReceived and ProgrammingCompleted (NotStarted has no button
+pressed yet, ReleasedToManufacturing has moved on to Fabrication) shows
+up in the Detailing column with its current stage as the "process"
+label. These aren't real tasks - TaskCard now checks an isSynthetic
+flag to skip the Complete button entirely (that's not how engineering
+stages advance) and route a click to the unit page instead of trying
+to open a task drawer for a task id that doesn't exist.
+---
+ .../mission-control/mission-control.module.ts | 75 ++++++++++++++++++-
+ .../features/mission-control/task-card.tsx    | 17 ++++-
+ 2 files changed, 87 insertions(+), 5 deletions(-)
+
+diff --git a/apps/api/src/modules/mission-control/mission-control.module.ts b/apps/api/src/modules/mission-control/mission-control.module.ts
+index fbe3122..e85b24c 100644
+--- a/apps/api/src/modules/mission-control/mission-control.module.ts
++++ b/apps/api/src/modules/mission-control/mission-control.module.ts
+@@ -4,11 +4,62 @@ import { PrismaService } from '../../common/prisma/prisma.service';
+ import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
+ import { CurrentUser } from '../../common/decorators/current-user.decorator';
+ import { JwtPayload, TaskStatus } from '@hvacflow/shared-types';
++import { EngineeringStatus } from '@prisma/client';
++
++// Engineering/Detailing's progress (Submittal Received, Design
++// Completed, etc.) is tracked entirely on Unit.engineeringStatus - it
++// never creates a real ProductionTask, because there's no process
++// route for it the way Fabrication/Assembly/etc. have. That means its
++// department column here was always empty, even though real work is
++// clearly happening - clicking "Mark Submittal Received" on the
++// Engineering Dashboard did something, just nothing that ever showed
++// up on the shared board. Synthesized entries below give it real
++// visibility without requiring a much larger rework of the engineering
++// workflow into the task system.
++const ENGINEERING_STAGE_LABELS: Partial<Record<EngineeringStatus, string>> = {
++  [EngineeringStatus.SubmittalReceived]: 'Submittal Received',
++  [EngineeringStatus.DesigningStarted]: 'Designing',
++  [EngineeringStatus.UnitDesignCompleted]: 'Design Completed',
++  [EngineeringStatus.DrawingsCompleted]: 'Drawings Completed',
++  [EngineeringStatus.ProgrammingCompleted]: 'Programming Completed',
++};
+ 
+ @Injectable()
+ export class MissionControlService {
+   constructor(private readonly prisma: PrismaService) {}
+ 
++  private async getEngineeringStageEntries() {
++    const units = await this.prisma.unit.findMany({
++      where: {
++        deletedAt: null,
++        // NotStarted hasn't had a button pressed yet - nothing to show.
++        // ReleasedToManufacturing has moved on to Fabrication already.
++        engineeringStatus: { notIn: [EngineeringStatus.NotStarted, EngineeringStatus.ReleasedToManufacturing] },
++      },
++      include: {
++        unitType: true,
++        priorityLevel: true,
++        order: { include: { project: { include: { customer: { select: { name: true } } } } } },
++      },
++      orderBy: [{ priorityLevel: { sortOrder: 'desc' } }, { dueDate: 'asc' }],
++    });
++
++    return units.map((unit) => ({
++      id: `engineering-${unit.id}`,
++      status: TaskStatus.InProgress,
++      processDefinition: { name: ENGINEERING_STAGE_LABELS[unit.engineeringStatus] ?? unit.engineeringStatus },
++      priorityLevel: unit.priorityLevel,
++      assignedUser: null,
++      machine: null,
++      part: null,
++      unit,
++      // Not a real task - clicking through to a task drawer would fail
++      // (no ProductionTask with this id exists). Flagged so the
++      // frontend can route a click to the unit page instead.
++      isSynthetic: true,
++    }));
++  }
++
+   async getBoard(
+     callerDeptIds: string[],
+     hasViewAll: boolean,
+@@ -56,6 +107,14 @@ export class MissionControlService {
+       TaskStatus.OnHold,
+     ];
+ 
++    // Fetched once outside the per-department loop since it's not
++    // filtered by departmentId the same way real tasks are. Skipped
++    // entirely if Detailing isn't even in the current department list
++    // (e.g. viewing a single other department) - no point querying it.
++    const engineeringEntries = departments.some((d) => d.code === 'ENG')
++      ? await this.getEngineeringStageEntries()
++      : [];
++
+     // Build Kanban columns in parallel
+     const columns = await Promise.all(
+       departments.map(async (dept) => {
+@@ -107,10 +166,22 @@ export class MissionControlService {
+           ],
+         });
+ 
++        // Detailing/Engineering never has real ProductionTask rows -
++        // splice in the synthetic entries here instead, respecting the
++        // same priority/mine filters real tasks already went through.
++        const isEngineeringDept = dept.code === 'ENG';
++        const filteredEngineeringEntries = isEngineeringDept
++          ? engineeringEntries.filter((e) =>
++              (!filters.priorityLevelId || e.priorityLevel?.id === filters.priorityLevelId) &&
++              !filters.mine, // "My Tasks" has no meaning here - nobody's assigned to an engineering stage
++            )
++          : [];
++        const allTasks = isEngineeringDept ? [...tasks, ...filteredEngineeringEntries] : tasks;
++
+         return {
+           department: dept,
+-          taskCount: tasks.length,
+-          tasks,
++          taskCount: allTasks.length,
++          tasks: allTasks,
+         };
+       }),
+     );
+diff --git a/apps/web/src/features/mission-control/task-card.tsx b/apps/web/src/features/mission-control/task-card.tsx
+index 2bf0156..61f7f0d 100644
+--- a/apps/web/src/features/mission-control/task-card.tsx
++++ b/apps/web/src/features/mission-control/task-card.tsx
+@@ -1,5 +1,6 @@
+ 'use client';
+ 
++import { useRouter } from 'next/navigation';
+ import { cn, getElapsed, STATUS_BG } from '@/lib/utils';
+ import { TaskStatus } from '@hvacflow/shared-types';
+ import { Avatar, Button } from '@/components/shared';
+@@ -14,20 +15,30 @@ interface TaskCardProps {
+ }
+ 
+ export function TaskCard({ task, onClick, onComplete, completing }: TaskCardProps) {
++  const router = useRouter();
+   const isInProgress = task.status === TaskStatus.InProgress;
+   const isPendingVerification = task.status === TaskStatus.PendingVerification;
+   const isOnHold = task.status === TaskStatus.OnHold;
+   const isReady = task.status === TaskStatus.Ready;
+-  const canComplete = (isReady || isInProgress) && !!onComplete;
++  // Engineering-stage entries aren't real ProductionTask rows (there's
++  // no process route behind them) - no checklist/complete flow applies,
++  // that happens on the Engineering Dashboard instead. Clicking one
++  // navigates to the unit rather than trying to open a task drawer for
++  // a task id that doesn't actually exist.
++  const isSynthetic = !!task.isSynthetic;
++  const canComplete = (isReady || isInProgress) && !!onComplete && !isSynthetic;
+   const unitSerial = task.part?.unit?.serialNumber ?? task.unit?.serialNumber ?? '—';
+   const partLabel = task.part ? `${task.part.partType?.name} · ${task.part.identifier}` : null;
++  const handleClick = isSynthetic
++    ? (task.unit?.id ? () => router.push(`/units/${task.unit.id}`) : undefined)
++    : onClick;
+ 
+   return (
+     <div
+-      onClick={onClick}
++      onClick={handleClick}
+       className={cn(
+         'task-card group select-none',
+-        !onClick && 'cursor-default hover:border-border hover:bg-card hover:shadow-none',
++        !handleClick && 'cursor-default hover:border-border hover:bg-card hover:shadow-none',
+         isOnHold && 'opacity-60',
+         isPendingVerification && 'border-orange-500/40',
+       )}
+-- 
+2.43.0
+
+
+From c0538d370a0f3b8b9e6c374984306d285c01e65f Mon Sep 17 00:00:00 2001
+From: Claude <claude@anthropic.com>
+Date: Thu, 16 Jul 2026 14:45:10 +0000
+Subject: [PATCH 3/7] Item 2: side-by-side process/station columns, reorderable
+ on Supervisor Dashboard
+
+When viewing a single department (e.g. Fabrication via the admin
+sidebar link, or on Supervisor Dashboard), each process/station
+(Cutting, Bending, Foaming) is now its own column shown side by side,
+instead of stacked vertically inside one narrow column - directly
+addresses "see all the processes... side by side."
+
+Split deliberately by page:
+- Shop Floor Dashboard: side-by-side layout only, no drag capability
+  at all - it must stay a passive viewing board per the standing rule
+  from earlier this session (no click, no drag, ever, full stop).
+- Supervisor Dashboard: same side-by-side layout, PLUS drag-to-reorder
+  station columns by their header ("let me place the things where I
+  like"), persisted to localStorage per department so the arrangement
+  is remembered next time. This is the interactive page, so this is
+  where customization actually belongs.
+
+I caught myself building the draggable version on Shop Floor first by
+mistake and corrected it before committing - flagging that explicitly
+since getting that boundary right was the whole point of item 4 from
+your last message.
+---
+ .../app/(dashboard)/department-work/page.tsx  | 134 +++++++++++++++---
+ .../src/app/(dashboard)/shop-floor/page.tsx   |  55 +++++++
+ 2 files changed, 167 insertions(+), 22 deletions(-)
+
+diff --git a/apps/web/src/app/(dashboard)/department-work/page.tsx b/apps/web/src/app/(dashboard)/department-work/page.tsx
+index 70e4994..13edfe1 100644
+--- a/apps/web/src/app/(dashboard)/department-work/page.tsx
++++ b/apps/web/src/app/(dashboard)/department-work/page.tsx
+@@ -1,7 +1,7 @@
+ 'use client';
+ 
+ import Link from 'next/link';
+-import { useEffect, useState, useCallback } from 'react';
++import { useEffect, useState, useCallback, useRef } from 'react';
+ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+ import { api } from '@/lib/api';
+ import { Badge, Button, Card, EmptyState, Input, Modal, PageHeader, ProgressBar, Select, Spinner, toast } from '@/components/shared';
+@@ -9,7 +9,7 @@ import { TaskCard } from '@/features/mission-control/task-card';
+ import { TaskDrawer } from '@/features/tasks/task-drawer';
+ import { useAuthStore } from '@/store/auth.store';
+ import { useWsEvent } from '@/lib/websocket';
+-import { Rocket, CheckCircle2, Clock3, Hammer, Package } from 'lucide-react';
++import { Rocket, CheckCircle2, Clock3, Hammer, Package, GripVertical } from 'lucide-react';
+ import { cn } from '@/lib/utils';
+ 
+ // The real interactive tool for a department supervisor - click a
+@@ -156,26 +156,12 @@ export default function SupervisorDashboardPage() {
+                 ) : tasks.length === 0 ? (
+                   <EmptyState title="No active work" description="No routed parts are ready or active in this department." />
+                 ) : (
+-                  <div className="space-y-6">
+-                    {[...stations.entries()].map(([stationName, stationTasks]) => (
+-                      <div key={stationName}>
+-                        <div className="flex items-center justify-between mb-2">
+-                          <h3 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">{stationName}</h3>
+-                          <Badge variant="muted">{stationTasks.length}</Badge>
+-                        </div>
+-                        <div className="grid sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+-                          {stationTasks.map((task: any) => (
+-                            <TaskCard
+-                              key={task.id}
+-                              task={task}
+-                              onComplete={(taskId) => completeMutation.mutate(taskId)}
+-                              completing={completeMutation.isPending && completeMutation.variables === task.id}
+-                            />
+-                          ))}
+-                        </div>
+-                      </div>
+-                    ))}
+-                  </div>
++                  <StationColumns
++                    departmentId={departmentId}
++                    stations={stations}
++                    onComplete={(taskId) => completeMutation.mutate(taskId)}
++                    completingTaskId={completeMutation.isPending ? (completeMutation.variables as string) : null}
++                  />
+                 )}
+               </>
+             )}
+@@ -187,6 +173,110 @@ export default function SupervisorDashboardPage() {
+   );
+ }
+ 
++function StationColumns({
++  departmentId,
++  stations,
++  onComplete,
++  completingTaskId,
++}: {
++  departmentId: string;
++  stations: Map<string, any[]>;
++  onComplete: (taskId: string) => void;
++  completingTaskId: string | null;
++}) {
++  const storageKey = `hvacflow:station-order:${departmentId}`;
++  const availableStations = [...stations.keys()];
++
++  const [stationOrder, setStationOrder] = useState<string[]>(availableStations);
++  const [draggedStation, setDraggedStation] = useState<string | null>(null);
++  const loadedKeyRef = useRef<string | null>(null);
++
++  // Load the saved order once per department, then reconcile with
++  // whatever stations actually have work right now - keep the user's
++  // arrangement for stations still present, append any new ones, drop
++  // ones that no longer have anything in them.
++  useEffect(() => {
++    if (loadedKeyRef.current === storageKey) {
++      setStationOrder((current) => {
++        const kept = current.filter((s) => availableStations.includes(s));
++        const added = availableStations.filter((s) => !current.includes(s));
++        return [...kept, ...added];
++      });
++      return;
++    }
++    loadedKeyRef.current = storageKey;
++    const saved = localStorage.getItem(storageKey);
++    if (saved) {
++      try {
++        const order = JSON.parse(saved) as string[];
++        const kept = order.filter((s) => availableStations.includes(s));
++        const added = availableStations.filter((s) => !order.includes(s));
++        setStationOrder([...kept, ...added]);
++        return;
++      } catch {
++        localStorage.removeItem(storageKey);
++      }
++    }
++    setStationOrder(availableStations);
++    // eslint-disable-next-line react-hooks/exhaustive-deps
++  }, [storageKey, availableStations.join(',')]);
++
++  function moveStation(targetName: string) {
++    if (!draggedStation || draggedStation === targetName) return;
++    setStationOrder((current) => {
++      const next = [...current];
++      const fromIndex = next.indexOf(draggedStation);
++      const toIndex = next.indexOf(targetName);
++      if (fromIndex < 0 || toIndex < 0) return current;
++      const [moved] = next.splice(fromIndex, 1);
++      next.splice(toIndex, 0, moved);
++      localStorage.setItem(storageKey, JSON.stringify(next));
++      return next;
++    });
++    setDraggedStation(null);
++  }
++
++  return (
++    <div className="overflow-x-auto pb-2">
++      <div className="flex gap-4 min-w-max">
++        {stationOrder.map((stationName) => {
++          const stationTasks = stations.get(stationName) ?? [];
++          return (
++            <div
++              key={stationName}
++              draggable
++              onDragStart={() => setDraggedStation(stationName)}
++              onDragEnd={() => setDraggedStation(null)}
++              onDragOver={(e) => e.preventDefault()}
++              onDrop={() => moveStation(stationName)}
++              className={cn('flex flex-col w-72 flex-shrink-0 cursor-grab active:cursor-grabbing', draggedStation === stationName && 'opacity-40')}
++            >
++              <div className="flex items-center justify-between mb-2 px-1">
++                <div className="flex items-center gap-1.5">
++                  <GripVertical className="w-3.5 h-3.5 text-muted-foreground" />
++                  <h3 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">{stationName}</h3>
++                </div>
++                <Badge variant="muted">{stationTasks.length}</Badge>
++              </div>
++              <div className="space-y-2">
++                {stationTasks.map((task: any) => (
++                  <TaskCard
++                    key={task.id}
++                    task={task}
++                    onComplete={onComplete}
++                    completing={completingTaskId === task.id}
++                  />
++                ))}
++              </div>
++            </div>
++          );
++        })}
++      </div>
++      <p className="text-[11px] text-muted-foreground mt-3">Drag a station's header to reorder it - your layout is remembered.</p>
++    </div>
++  );
++}
++
+ function AssemblyView({ allDepartments, canStartUnits }: { allDepartments: any[]; canStartUnits: boolean }) {
+   const [startModalUnit, setStartModalUnit] = useState<any | null>(null);
+   const purchasingActive = allDepartments.find((d: any) => d.name === 'Purchasing')?.isActive ?? false;
+diff --git a/apps/web/src/app/(dashboard)/shop-floor/page.tsx b/apps/web/src/app/(dashboard)/shop-floor/page.tsx
+index adcc52b..ea90854 100644
+--- a/apps/web/src/app/(dashboard)/shop-floor/page.tsx
++++ b/apps/web/src/app/(dashboard)/shop-floor/page.tsx
+@@ -251,6 +251,13 @@ function KanbanBoard({ columns, big, zoomLevel }: { columns: any[]; big?: boolea
+       </div>
+     );
+   }
++  // Viewing a single department (e.g. via the admin sidebar's per-
++  // department link) - show each process/station side by side instead
++  // of stacked inside one narrow column, and let the order be
++  // rearranged and remembered per department.
++  if (columns.length === 1) {
++    return <StationBoard column={columns[0]} big={big} zoomLevel={zoomLevel} />;
++  }
+   return (
+     <div className="flex-1 overflow-x-auto overflow-y-hidden">
+       <div className={cn('flex gap-3 p-4 h-full min-w-max', big && 'gap-4 p-6')}>
+@@ -262,6 +269,54 @@ function KanbanBoard({ columns, big, zoomLevel }: { columns: any[]; big?: boolea
+   );
+ }
+ 
++function StationBoard({ column, big, zoomLevel }: { column: any; big?: boolean; zoomLevel: number }) {
++  const { department, tasks } = column;
++  const widthClass = big ? 'w-96' : ZOOM_STEPS[zoomLevel];
++
++  const stationsMap = new Map<string, any[]>();
++  for (const task of tasks) {
++    const stationName = task.processDefinition?.name ?? 'Unassigned';
++    if (!stationsMap.has(stationName)) stationsMap.set(stationName, []);
++    stationsMap.get(stationName)!.push(task);
++  }
++  const stationNames = [...stationsMap.keys()];
++
++  return (
++    <div className="flex-1 overflow-x-auto overflow-y-hidden">
++      <div className={cn('flex gap-3 p-4 h-full min-w-max', big && 'gap-4 p-6')}>
++        {stationNames.map((stationName) => {
++          const stationTasks = stationsMap.get(stationName) ?? [];
++          return (
++            <div key={stationName} className={cn('flex flex-col flex-shrink-0', widthClass)}>
++              <div className="flex items-center justify-between mb-3 px-1">
++                <div className="flex items-center gap-2">
++                  <div className={cn('rounded-full flex-shrink-0', big ? 'w-4 h-4' : 'w-2.5 h-2.5')} style={{ backgroundColor: department.color ?? '#6b7280' }} />
++                  <span className={cn('font-medium text-foreground', big ? 'text-xl' : 'text-sm')}>{stationName}</span>
++                </div>
++                <span className={cn('text-muted-foreground bg-muted rounded-full tabular-nums', big ? 'text-base px-3 py-1' : 'text-xs px-2 py-0.5')}>{stationTasks.length}</span>
++              </div>
++              <div className="flex-1 overflow-y-auto space-y-2 pb-4">
++                {stationTasks.length === 0 ? (
++                  <div className={cn('flex items-center justify-center border border-dashed border-border rounded-lg text-muted-foreground', big ? 'h-24 text-base' : 'h-20 text-xs')}>
++                    No active tasks
++                  </div>
++                ) : (
++                  stationTasks.map((task: any) => <TaskCard key={task.id} task={task} />)
++                )}
++              </div>
++            </div>
++          );
++        })}
++        {stationNames.length === 0 && (
++          <div className="flex-1 flex items-center justify-center">
++            <EmptyState title="No active tasks" description={`Nothing in progress in ${department.name} right now.`} />
++          </div>
++        )}
++      </div>
++    </div>
++  );
++}
++
+ function KanbanColumn({ column, big, zoomLevel }: { column: any; big?: boolean; zoomLevel: number }) {
+   const { department, tasks, taskCount } = column;
+   const widthClass = big ? 'w-96' : ZOOM_STEPS[zoomLevel];
+-- 
+2.43.0
+
+
+From 31ec236e987b9f414a661c2641365922415f0537 Mon Sep 17 00:00:00 2001
+From: Claude <claude@anthropic.com>
+Date: Thu, 16 Jul 2026 14:45:23 +0000
+Subject: [PATCH 4/7] Item 3: fix Purchasing (and everything else) being
+ unscrollable in the sidebar
+
+Same flexbox min-size gotcha as the earlier horizontal-scroll fix, just
+on the vertical axis this time: the sidebar's <nav> is a flex-1 child
+of a flex-col container, and flex children default to min-height:
+auto - refusing to shrink below their own content height. With
+Departments (10 items) and Configuration (11 items) sections both now
+in the sidebar, the nav's content easily exceeds the viewport height,
+but its own overflow-y-auto never actually activated because of this.
+Added min-h-0, same fix pattern as before.
+
+Also found and fixed a second, separate bug in the mobile sidebar
+specifically: its wrapping div was never actually a flex container in
+the first place (no flex/flex-col class), so the flex-1 class on its
+nav child did nothing at all - meaningless without a flex parent. Made
+the wrapper an actual flex column container so flex-1 + min-h-0 mean
+something there too.
+---
+ apps/web/src/app/(dashboard)/layout.tsx | 6 +++---
+ 1 file changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/apps/web/src/app/(dashboard)/layout.tsx b/apps/web/src/app/(dashboard)/layout.tsx
+index 6834e96..2cf9b75 100644
+--- a/apps/web/src/app/(dashboard)/layout.tsx
++++ b/apps/web/src/app/(dashboard)/layout.tsx
+@@ -162,7 +162,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
+         </div>
+ 
+         {/* Navigation */}
+-        <nav className="flex-1 overflow-y-auto py-3 space-y-0.5 px-2">
++        <nav className="flex-1 min-h-0 overflow-y-auto py-3 space-y-0.5 px-2">
+           {visibleNavItems.map((item) => {
+             const Icon = item.icon;
+             const active = pathname === item.href || pathname.startsWith(item.href + '/');
+@@ -292,10 +292,10 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
+           onClick={() => setMobileMenuOpen(false)}
+         >
+           <div
+-            className="w-64 h-full bg-card border-r border-border pt-14"
++            className="w-64 h-full bg-card border-r border-border pt-14 flex flex-col"
+             onClick={(e) => e.stopPropagation()}
+           >
+-            <nav className="flex-1 overflow-y-auto py-3 space-y-0.5 px-2">
++            <nav className="flex-1 min-h-0 overflow-y-auto py-3 space-y-0.5 px-2">
+               {visibleNavItems.map((item) => {
+                 const Icon = item.icon;
+                 const active = pathname === item.href;
+-- 
+2.43.0
+
+
+From a71925c2323e66a281531c7642c02d355d9c9445 Mon Sep 17 00:00:00 2001
+From: Claude <claude@anthropic.com>
+Date: Thu, 16 Jul 2026 14:45:30 +0000
+Subject: [PATCH 5/7] Item 4: Planner sees every active unit, not just the
+ narrow release-ready subset
+
+plannerQueue() was filtered to only engineeringStatus=ReleasedToManufacturing
++ productionReleaseStatus=AwaitingRelease - meaning a unit was invisible
+to the Planner until Engineering had fully finished with it. Broadened
+to every non-Completed/non-Dispatched unit, so the Planner can work
+ahead and assign parts to units still earlier in the pipeline, per
+"I should be able to see the list of all units."
+
+The actual release-to-Production-Manager action is still correctly
+gated server-side in markPlanned() exactly as before (unchanged) - the
+frontend now shows a badge distinguishing units that are actually
+release-eligible right now from ones still in Engineering, rather than
+hiding the latter entirely. Added search (by serial number/display
+name) given the list is meaningfully larger now.
+---
+ apps/api/src/modules/units/units.service.ts   |  11 +-
+ .../(dashboard)/planner-dashboard/page.tsx    | 137 +++++++++++-------
+ 2 files changed, 97 insertions(+), 51 deletions(-)
+
+diff --git a/apps/api/src/modules/units/units.service.ts b/apps/api/src/modules/units/units.service.ts
+index 9f876ae..89c2c92 100644
+--- a/apps/api/src/modules/units/units.service.ts
++++ b/apps/api/src/modules/units/units.service.ts
+@@ -310,12 +310,19 @@ export class UnitsService {
+   // Planned yet. This is the "assign parts" stage that sits between
+   // Engineering's release and the Production Manager's release-to-
+   // Fabrication step.
++  // Planner needs to see every active unit, not just the narrow subset
++  // that's already past Engineering and waiting to be planned - they
++  // need to work ahead, assigning parts to units that haven't even
++  // finished Engineering yet. The "Release to Production Manager"
++  // action itself still only makes sense (and is still validated
++  // server-side in markPlanned()) once Engineering has actually
++  // released the unit - the frontend shows that distinction rather
++  // than hiding not-yet-eligible units entirely.
+   async plannerQueue() {
+     return this.prisma.unit.findMany({
+       where: {
+         deletedAt: null,
+-        engineeringStatus: EngineeringStatus.ReleasedToManufacturing,
+-        productionReleaseStatus: ProductionReleaseStatus.AwaitingRelease,
++        status: { notIn: [UnitStatus.Completed, UnitStatus.Dispatched] },
+       },
+       include: { ...this.unitSummaryInclude(), parts: { where: { deletedAt: null }, include: { partType: true } } },
+       orderBy: [{ dueDate: 'asc' }, { priorityPosition: 'asc' }],
+diff --git a/apps/web/src/app/(dashboard)/planner-dashboard/page.tsx b/apps/web/src/app/(dashboard)/planner-dashboard/page.tsx
+index 282d7d7..a3426ff 100644
+--- a/apps/web/src/app/(dashboard)/planner-dashboard/page.tsx
++++ b/apps/web/src/app/(dashboard)/planner-dashboard/page.tsx
+@@ -5,18 +5,25 @@ import Link from 'next/link';
+ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+ import { api } from '@/lib/api';
+ import { Badge, Button, Card, EmptyState, PageHeader, Spinner, toast } from '@/components/shared';
+-import { Package, Rocket, X } from 'lucide-react';
++import { Package, Rocket, X, Search } from 'lucide-react';
+ import { cn } from '@/lib/utils';
+ 
+ const PART_DRAG_TYPE = 'application/x-hvacflow-parttype';
+ 
+ export default function PlannerDashboardPage() {
+   const queryClient = useQueryClient();
++  const [search, setSearch] = useState('');
+   const { data: units = [], isLoading } = useQuery({
+     queryKey: ['units', 'planner-queue'],
+     queryFn: api.units.plannerQueue,
+     refetchInterval: 20_000,
+   });
++  const filteredUnits = search.trim()
++    ? units.filter((u: any) =>
++        u.serialNumber?.toLowerCase().includes(search.toLowerCase()) ||
++        u.displayName?.toLowerCase().includes(search.toLowerCase()),
++      )
++    : units;
+   const { data: partTypes = [] } = useQuery({
+     queryKey: ['part-types'],
+     queryFn: () => api.partTypes.list({ isActive: true }),
+@@ -99,61 +106,93 @@ export default function PlannerDashboardPage() {
+           </div>
+         </Card>
+ 
+-        {/* Units awaiting planning */}
++        {/* Units */}
+         {isLoading ? (
+           <div className="flex items-center justify-center h-52"><Spinner className="w-7 h-7" /></div>
+         ) : units.length === 0 ? (
+-          <EmptyState title="Nothing to plan right now" description="Units show up here once Engineering releases them." />
++          <EmptyState title="No active units" />
+         ) : (
+-          <div className="space-y-4">
+-            {units.map((unit: any) => (
+-              <div
+-                key={unit.id}
+-                onDragOver={(e) => { e.preventDefault(); setDragOverUnitId(unit.id); }}
+-                onDragLeave={() => setDragOverUnitId((current) => (current === unit.id ? null : current))}
+-                onDrop={(e) => handleDrop(e, unit.id)}
+-              >
+-                <Card className={cn(
+-                  'p-4 transition-all',
+-                  dragOverUnitId === unit.id && 'ring-2 ring-primary bg-primary/5',
+-                )}>
+-                  <div className="flex items-center justify-between gap-3 mb-3">
+-                    <div>
+-                      <Link href={`/units/${unit.id}`} className="font-semibold hover:text-primary">{unit.serialNumber}</Link>
+-                      <div className="text-xs text-muted-foreground">{unit.unitType?.name}{unit.dueDate ? ` · Ships ${new Date(unit.dueDate).toLocaleDateString()}` : ''}</div>
+-                    </div>
+-                    <Button
+-                      size="sm"
+-                      leftIcon={<Rocket className="w-3.5 h-3.5" />}
+-                      disabled={(unit.parts?.length ?? 0) === 0}
+-                      loading={releaseMutation.isPending && releaseMutation.variables === unit.id}
+-                      onClick={() => releaseMutation.mutate(unit.id)}
++          <>
++            <div className="relative max-w-sm mb-4">
++              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground pointer-events-none" />
++              <input
++                value={search}
++                onChange={(e) => setSearch(e.target.value)}
++                placeholder="Search units by number or name…"
++                className="w-full h-9 pl-8 pr-7 rounded-md border border-border bg-secondary text-sm focus:outline-none focus:ring-1 focus:ring-primary/50"
++              />
++              {search && (
++                <button onClick={() => setSearch('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
++                  <X className="w-3.5 h-3.5" />
++                </button>
++              )}
++            </div>
++
++            {filteredUnits.length === 0 ? (
++              <EmptyState title="No units match your search" />
++            ) : (
++              <div className="space-y-4">
++                {filteredUnits.map((unit: any) => {
++                  const releaseEligible = unit.engineeringStatus === 'ReleasedToManufacturing' && unit.productionReleaseStatus === 'AwaitingRelease';
++                  return (
++                    <div
++                      key={unit.id}
++                      onDragOver={(e) => { e.preventDefault(); setDragOverUnitId(unit.id); }}
++                      onDragLeave={() => setDragOverUnitId((current) => (current === unit.id ? null : current))}
++                      onDrop={(e) => handleDrop(e, unit.id)}
+                     >
+-                      Release to Production Manager
+-                    </Button>
+-                  </div>
++                      <Card className={cn(
++                        'p-4 transition-all',
++                        dragOverUnitId === unit.id && 'ring-2 ring-primary bg-primary/5',
++                      )}>
++                        <div className="flex items-center justify-between gap-3 mb-3">
++                          <div>
++                            <Link href={`/units/${unit.id}`} className="font-semibold hover:text-primary">{unit.serialNumber}</Link>
++                            <div className="text-xs text-muted-foreground">{unit.unitType?.name}{unit.dueDate ? ` · Ships ${new Date(unit.dueDate).toLocaleDateString()}` : ''}</div>
++                          </div>
++                          {releaseEligible ? (
++                            <Button
++                              size="sm"
++                              leftIcon={<Rocket className="w-3.5 h-3.5" />}
++                              disabled={(unit.parts?.length ?? 0) === 0}
++                              loading={releaseMutation.isPending && releaseMutation.variables === unit.id}
++                              onClick={() => releaseMutation.mutate(unit.id)}
++                            >
++                              Release to Production Manager
++                            </Button>
++                          ) : (
++                            <span title="Engineering hasn't released this unit yet - you can still add parts ahead of time.">
++                              <Badge variant="muted">
++                                {unit.engineeringStatus === 'ReleasedToManufacturing' ? 'Already planned' : 'Still in Engineering'}
++                              </Badge>
++                            </span>
++                          )}
++                        </div>
+ 
+-                  <div className="rounded-lg border-2 border-dashed border-border p-3 min-h-[88px]">
+-                    {(unit.parts?.length ?? 0) === 0 ? (
+-                      <p className="text-xs text-muted-foreground text-center py-4">Drop a part type here to add it to this unit.</p>
+-                    ) : (
+-                      <div className="flex flex-wrap gap-2">
+-                        {unit.parts.map((part: any) => (
+-                          <span key={part.id} className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-secondary text-xs">
+-                            <Package className="w-3 h-3 text-muted-foreground" />
+-                            {part.partType?.name ?? part.identifier}
+-                          </span>
+-                        ))}
+-                      </div>
+-                    )}
+-                  </div>
+-                  {(unit.parts?.length ?? 0) === 0 && (
+-                    <p className="text-[11px] text-muted-foreground mt-1.5">Add at least one part before releasing.</p>
+-                  )}
+-                </Card>
++                        <div className="rounded-lg border-2 border-dashed border-border p-3 min-h-[88px]">
++                          {(unit.parts?.length ?? 0) === 0 ? (
++                            <p className="text-xs text-muted-foreground text-center py-4">Drop a part type here to add it to this unit.</p>
++                          ) : (
++                            <div className="flex flex-wrap gap-2">
++                              {unit.parts.map((part: any) => (
++                                <span key={part.id} className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-secondary text-xs">
++                                  <Package className="w-3 h-3 text-muted-foreground" />
++                                  {part.partType?.name ?? part.identifier}
++                                </span>
++                              ))}
++                            </div>
++                          )}
++                        </div>
++                        {releaseEligible && (unit.parts?.length ?? 0) === 0 && (
++                          <p className="text-[11px] text-muted-foreground mt-1.5">Add at least one part before releasing.</p>
++                        )}
++                      </Card>
++                    </div>
++                  );
++                })}
+               </div>
+-            ))}
+-          </div>
++            )}
++          </>
+         )}
+       </div>
+     </div>
+-- 
+2.43.0
+
+
+From 66df3f7e2c1e7fd92a667591172565f54f4d641a Mon Sep 17 00:00:00 2001
+From: Claude <claude@anthropic.com>
+Date: Thu, 16 Jul 2026 15:17:45 +0000
+Subject: [PATCH 6/7] CRITICAL FIX: replace broken $use middleware with a
+ stable interceptor
+
+Confirmed by the user's real typecheck output (not something I could
+catch in my own sandbox, which lacks a fully generated Prisma client):
+
+  src/common/prisma/prisma.service.ts:42:10 - error TS2339:
+  Property '$use' does not exist on type 'PrismaService'.
+
+The earlier Decimal-to-number fix used PrismaService.$use() middleware.
+That API is fully removed in this project's Prisma version (6.19.3) -
+not deprecated-but-working, actually gone from the type surface
+entirely. That fix could never have worked as shipped.
+
+Replaced with a NestJS response interceptor (DecimalTransformInterceptor)
+instead - a stable, non-Prisma-version-dependent API that converts
+Decimal instances to plain numbers on the way out of every response.
+Registered in main.ts AFTER ClassSerializerInterceptor specifically -
+Nest runs later-registered interceptors' response transforms first
+(closer to the raw handler output), so this order makes Decimal
+conversion happen before class-transformer's instanceToPlain() ever
+sees a raw Decimal to mangle. Swapping that order would silently break
+the fix again.
+
+PrismaService reverts to a plain PrismaClient subclass with no custom
+constructor logic - the conversion no longer lives there at all.
+---
+ .../decimal-transform.interceptor.ts          | 41 +++++++++++++++++++
+ apps/api/src/common/prisma/prisma.service.ts  | 32 +--------------
+ apps/api/src/main.ts                          |  8 ++++
+ 3 files changed, 50 insertions(+), 31 deletions(-)
+ create mode 100644 apps/api/src/common/interceptors/decimal-transform.interceptor.ts
+
+diff --git a/apps/api/src/common/interceptors/decimal-transform.interceptor.ts b/apps/api/src/common/interceptors/decimal-transform.interceptor.ts
+new file mode 100644
+index 0000000..00261ba
+--- /dev/null
++++ b/apps/api/src/common/interceptors/decimal-transform.interceptor.ts
+@@ -0,0 +1,41 @@
++import { Injectable, NestInterceptor, ExecutionContext, CallHandler } from '@nestjs/common';
++import { Observable } from 'rxjs';
++import { map } from 'rxjs/operators';
++import { Prisma } from '@prisma/client';
++
++// Prisma's Decimal type doesn't survive Nest's ClassSerializerInterceptor
++// cleanly - class-transformer walks the Decimal instance's own enumerable
++// properties instead of calling its toJSON(), so it arrives on the wire
++// as the raw decimal.js internal shape ({s, e, d}) instead of a number
++// or numeric string. Every Decimal field (Unit/Part.progressPercentage,
++// ProcessDefinition.weight) was affected - visibly as "NaN×" wherever
++// the frontend did Number(x) directly on it, silently as a broken
++// progress bar everywhere else (an invalid CSS width just gets dropped).
++//
++// The first fix attempt used PrismaService's $use() middleware to
++// convert Decimal -> number right after every query. That API was
++// removed entirely in this Prisma version (6.x) - it was a real,
++// confirmed compile error, not just an emulator gap. Middleware isn't
++// the right layer for this anyway; converting at the HTTP response
++// boundary via an interceptor is a stable, non-deprecated Nest API and
++// doesn't care what Prisma version is in use.
++function convertDecimals(value: unknown): unknown {
++  if (value === null || value === undefined) return value;
++  if (value instanceof Prisma.Decimal) return value.toNumber();
++  if (value instanceof Date) return value;
++  if (Array.isArray(value)) return value.map(convertDecimals);
++  if (typeof value === 'object') {
++    for (const key of Object.keys(value as Record<string, unknown>)) {
++      (value as Record<string, unknown>)[key] = convertDecimals((value as Record<string, unknown>)[key]);
++    }
++    return value;
++  }
++  return value;
++}
++
++@Injectable()
++export class DecimalTransformInterceptor implements NestInterceptor {
++  intercept(context: ExecutionContext, next: CallHandler): Observable<unknown> {
++    return next.handle().pipe(map((data) => convertDecimals(data)));
++  }
++}
+diff --git a/apps/api/src/common/prisma/prisma.service.ts b/apps/api/src/common/prisma/prisma.service.ts
+index a5f04cf..2f04a03 100644
+--- a/apps/api/src/common/prisma/prisma.service.ts
++++ b/apps/api/src/common/prisma/prisma.service.ts
+@@ -1,30 +1,5 @@
+ import { Injectable, OnModuleInit, OnModuleDestroy, Logger } from '@nestjs/common';
+-import { PrismaClient, Prisma } from '@prisma/client';
+-
+-// Prisma's Decimal type doesn't serialize cleanly through Nest's
+-// ClassSerializerInterceptor - it copies the decimal.js instance's raw
+-// internal shape ({s, e, d}) instead of calling its toJSON(), so every
+-// Decimal field (progressPercentage on Unit/Part, weight on
+-// ProcessDefinition) arrives on the frontend as an unusable object.
+-// `Number(thatObject)` then evaluates to NaN - visibly as "NaN×" on the
+-// Processes page, silently as a broken 0%-or-invalid progress bar
+-// everywhere else, since an invalid CSS width just gets ignored rather
+-// than showing text. Converting every Decimal to a plain number right
+-// after the query runs, globally, fixes this at the source instead of
+-// requiring every single call site to remember to do it.
+-function convertDecimals(value: unknown): unknown {
+-  if (value === null || value === undefined) return value;
+-  if (value instanceof Prisma.Decimal) return value.toNumber();
+-  if (value instanceof Date) return value;
+-  if (Array.isArray(value)) return value.map(convertDecimals);
+-  if (typeof value === 'object') {
+-    for (const key of Object.keys(value as Record<string, unknown>)) {
+-      (value as Record<string, unknown>)[key] = convertDecimals((value as Record<string, unknown>)[key]);
+-    }
+-    return value;
+-  }
+-  return value;
+-}
++import { PrismaClient } from '@prisma/client';
+ 
+ @Injectable()
+ export class PrismaService extends PrismaClient implements OnModuleInit, OnModuleDestroy {
+@@ -38,11 +13,6 @@ export class PrismaService extends PrismaClient implements OnModuleInit, OnModul
+         { emit: 'stdout', level: 'warn' },
+       ],
+     });
+-
+-    this.$use(async (params, next) => {
+-      const result = await next(params);
+-      return convertDecimals(result);
+-    });
+   }
+ 
+   async onModuleInit() {
+diff --git a/apps/api/src/main.ts b/apps/api/src/main.ts
+index 5e84a49..e968e4d 100644
+--- a/apps/api/src/main.ts
++++ b/apps/api/src/main.ts
+@@ -3,6 +3,7 @@ import { ValidationPipe, ClassSerializerInterceptor } from '@nestjs/common';
+ import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+ import { AppModule } from './app.module';
+ import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
++import { DecimalTransformInterceptor } from './common/interceptors/decimal-transform.interceptor';
+ import { ConfigService } from '@nestjs/config';
+ 
+ async function bootstrap() {
+@@ -39,8 +40,15 @@ async function bootstrap() {
+   );
+ 
+   // ─── Global serializer (excludes @Exclude() fields like passwordHash) ───────
++  // DecimalTransformInterceptor MUST come after ClassSerializerInterceptor
++  // in this array - Nest runs later-registered interceptors' response
++  // transforms first (closer to the raw handler output), so this
++  // ordering makes Decimal->number conversion happen BEFORE
++  // ClassSerializerInterceptor's instanceToPlain() ever sees a Decimal
++  // instance to mangle. Swapping this order would silently undo the fix.
+   app.useGlobalInterceptors(
+     new ClassSerializerInterceptor(app.get(Reflector)),
++    new DecimalTransformInterceptor(),
+   );
+ 
+   // ─── Global exception filter ────────────────────────────────────────────────
+-- 
+2.43.0
+
+
+From bb5d1f637b5dff647ae56c55014d1b9535f60968 Mon Sep 17 00:00:00 2001
+From: Claude <claude@anthropic.com>
+Date: Thu, 16 Jul 2026 15:17:57 +0000
+Subject: [PATCH 7/7] Add unified unit activity timeline (audit log)
+
+New ActivityLog model + module: one unit-scoped, plain-language event
+feed instead of scattered signals (task.completedAt, unit comments,
+etc.) that each only tell part of the story. Logged automatically at
+every meaningful business event, not manually per-page:
+
+- Unit created
+- Engineering stage advanced
+- Planner assigned parts and released to Production Manager
+- Manager released to Fabrication
+- Manufacturing started (Fabrication's Start Entire Unit)
+- Assembly build started (with team name)
+- Task completed (both direct completion and verify-then-complete)
+- Delay/blocker comments (only isDelay=true ones - regular comments
+  already have their own visible list, no need to duplicate them)
+- Vendor part received (both at creation and when flipped to received
+  later - date-only edits are NOT logged, that would flood the
+  timeline with noise every time an arrival date gets adjusted)
+- Unit blocked/unblocked, with the hold reason
+
+Logging never blocks or fails the real operation it's attached to -
+ActivityLogService.log() catches and swallows its own errors (logged
+to console) rather than letting a logging problem turn an unrelated
+write into a 500.
+
+New GET /units/:id/activity endpoint, and a timeline card on the unit
+detail page showing every entry with who/when, right below Comments.
+Reuses the existing WebSocket-driven query invalidation for live
+updates - React Query invalidates by key prefix, so the existing
+['unit', id] invalidations already cover the ['unit', id, 'activity']
+query without any new wiring.
+
+This directly enables item 2 from an earlier request in this session
+("manager should see who confirmed a process completed and at what
+time") with a real, permanent record instead of a one-off field.
+---
+ apps/api/src/app.module.ts                    |  2 +
+ .../activity-log/activity-log.module.ts       | 72 ++++++++++++++++
+ .../production-tasks.module.ts                |  3 +-
+ .../production-tasks.service.ts               | 21 +++++
+ apps/api/src/modules/units/units.module.ts    | 15 ++--
+ apps/api/src/modules/units/units.service.ts   | 86 ++++++++++++++++---
+ .../vendor-parts/vendor-parts.module.ts       | 39 +++++++--
+ .../src/app/(dashboard)/units/[id]/page.tsx   | 29 ++++++-
+ apps/web/src/lib/api.ts                       |  1 +
+ .../migration.sql                             | 31 +++++++
+ prisma/schema.prisma                          | 39 +++++++++
+ 11 files changed, 310 insertions(+), 28 deletions(-)
+ create mode 100644 apps/api/src/modules/activity-log/activity-log.module.ts
+ create mode 100644 prisma/migrations/20260716120000_add_activity_log/migration.sql
+
+diff --git a/apps/api/src/app.module.ts b/apps/api/src/app.module.ts
+index f1361ce..8522861 100644
+--- a/apps/api/src/app.module.ts
++++ b/apps/api/src/app.module.ts
+@@ -20,6 +20,7 @@ import { ProjectsModule } from './modules/projects/projects.module';
+ import { OrdersModule } from './modules/orders/orders.module';
+ import { UnitsModule } from './modules/units/units.module';
+ import { VendorPartsModule } from './modules/vendor-parts/vendor-parts.module';
++import { ActivityLogModule } from './modules/activity-log/activity-log.module';
+ import { PartsModule } from './modules/parts/parts.module';
+ import { ProductionTasksModule } from './modules/production-tasks/production-tasks.module';
+ import { WorkflowProgressModule } from './modules/workflow-progress/workflow-progress.module';
+@@ -64,6 +65,7 @@ import { ReportsModule } from './modules/reports/reports.module';
+     OrdersModule,
+     UnitsModule,
+     VendorPartsModule,
++    ActivityLogModule,
+     PartsModule,
+ 
+     // ─── Production Task Engine ─────────────────────────────────────────────
+diff --git a/apps/api/src/modules/activity-log/activity-log.module.ts b/apps/api/src/modules/activity-log/activity-log.module.ts
+new file mode 100644
+index 0000000..8c2115d
+--- /dev/null
++++ b/apps/api/src/modules/activity-log/activity-log.module.ts
+@@ -0,0 +1,72 @@
++import { Injectable, Controller, Get, Param, Module } from '@nestjs/common';
++import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
++import { PrismaService } from '../../common/prisma/prisma.service';
++import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
++import { ActivityAction } from '@prisma/client';
++
++@Injectable()
++export class ActivityLogService {
++  constructor(private readonly prisma: PrismaService) {}
++
++  /**
++   * Records one entry on a unit's activity timeline. Called from other
++   * services at the moment a meaningful business event happens - never
++   * awaited in a way that could fail the actual operation (logging a
++   * problem shouldn't block the real work), so callers should not put
++   * this inside the same transaction as the primary write unless the
++   * log entry is itself essential to that transaction's correctness.
++   */
++  async log(params: {
++    unitId: string;
++    userId?: string | null;
++    action: ActivityAction;
++    description: string;
++    metadata?: Record<string, unknown>;
++  }) {
++    try {
++      await this.prisma.activityLog.create({
++        data: {
++          unitId: params.unitId,
++          userId: params.userId ?? undefined,
++          action: params.action,
++          description: params.description,
++          metadata: params.metadata as any,
++        },
++      });
++    } catch (err) {
++      // Never let a logging failure break the real operation that
++      // triggered it (e.g. a unit being deleted concurrently would
++      // otherwise turn an unrelated write into a 500).
++      // eslint-disable-next-line no-console
++      console.error('ActivityLogService.log failed:', err);
++    }
++  }
++
++  async listByUnit(unitId: string) {
++    return this.prisma.activityLog.findMany({
++      where: { unitId },
++      include: { user: { select: { id: true, name: true } } },
++      orderBy: { createdAt: 'desc' },
++    });
++  }
++}
++
++@ApiTags('Activity Log')
++@ApiBearerAuth()
++@Controller()
++export class ActivityLogController {
++  constructor(private readonly service: ActivityLogService) {}
++
++  @Get('units/:unitId/activity')
++  @RequirePermissions('unit:view')
++  listByUnit(@Param('unitId') unitId: string) {
++    return this.service.listByUnit(unitId);
++  }
++}
++
++@Module({
++  controllers: [ActivityLogController],
++  providers: [ActivityLogService],
++  exports: [ActivityLogService],
++})
++export class ActivityLogModule {}
+diff --git a/apps/api/src/modules/production-tasks/production-tasks.module.ts b/apps/api/src/modules/production-tasks/production-tasks.module.ts
+index a438320..fff79ca 100644
+--- a/apps/api/src/modules/production-tasks/production-tasks.module.ts
++++ b/apps/api/src/modules/production-tasks/production-tasks.module.ts
+@@ -7,6 +7,7 @@ import { JwtPayload, TaskStatus } from '@hvacflow/shared-types';
+ import { WorkflowProgressModule } from '../workflow-progress/workflow-progress.module';
+ import { RealtimeModule } from '../realtime/realtime.module';
+ import { ChecklistsModule } from '../checklists/checklists.module';
++import { ActivityLogModule } from '../activity-log/activity-log.module';
+ import { IsBoolean, IsOptional, IsString } from 'class-validator';
+ 
+ class HoldRejectDto extends TaskActionDto {
+@@ -137,7 +138,7 @@ export class ProductionTasksController {
+ }
+ 
+ @Module({
+-  imports: [WorkflowProgressModule, RealtimeModule, ChecklistsModule],
++  imports: [WorkflowProgressModule, RealtimeModule, ChecklistsModule, ActivityLogModule],
+   controllers: [ProductionTasksController],
+   providers: [ProductionTasksService],
+   exports: [ProductionTasksService],
+diff --git a/apps/api/src/modules/production-tasks/production-tasks.service.ts b/apps/api/src/modules/production-tasks/production-tasks.service.ts
+index 7d79962..57f89a1 100644
+--- a/apps/api/src/modules/production-tasks/production-tasks.service.ts
++++ b/apps/api/src/modules/production-tasks/production-tasks.service.ts
+@@ -10,6 +10,8 @@ import { PrismaService } from '../../common/prisma/prisma.service';
+ import { WorkflowProgressService } from '../workflow-progress/workflow-progress.service';
+ import { RealtimeGateway } from '../realtime/realtime.gateway';
+ import { ChecklistsService } from '../checklists/checklists.service';
++import { ActivityLogService } from '../activity-log/activity-log.module';
++import { ActivityAction } from '@prisma/client';
+ import { TaskStatus } from '@hvacflow/shared-types';
+ import { IsOptional, IsString, IsUUID, IsBoolean } from 'class-validator';
+ 
+@@ -56,6 +58,7 @@ export class ProductionTasksService {
+     private readonly workflowProgress: WorkflowProgressService,
+     private readonly realtime: RealtimeGateway,
+     private readonly checklists: ChecklistsService,
++    private readonly activityLog: ActivityLogService,
+   ) {}
+ 
+   async findAll(query: QueryTasksDto, callerDeptIds: string[], hasViewAll: boolean) {
+@@ -220,6 +223,15 @@ export class ProductionTasksService {
+     // If fully completed (no verification needed), cascade and recompute
+     if (nextStatus === TaskStatus.Completed) {
+       await this.onTaskCompleted(updated);
++      const unitId = updated.unitId ?? updated.part?.unitId;
++      if (unitId) {
++        await this.activityLog.log({
++          unitId,
++          userId,
++          action: ActivityAction.TaskCompleted,
++          description: `${updated.processDefinition.name} completed${updated.part ? ` on ${updated.part.partType?.name ?? updated.part.identifier}` : ''}`,
++        });
++      }
+     }
+ 
+     return updated;
+@@ -253,6 +265,15 @@ export class ProductionTasksService {
+     });
+ 
+     await this.onTaskCompleted(updated);
++    const unitId = updated.unitId ?? updated.part?.unitId;
++    if (unitId) {
++      await this.activityLog.log({
++        unitId,
++        userId,
++        action: ActivityAction.TaskCompleted,
++        description: `${updated.processDefinition.name} verified and completed${updated.part ? ` on ${updated.part.partType?.name ?? updated.part.identifier}` : ''}`,
++      });
++    }
+     return updated;
+   }
+ 
+diff --git a/apps/api/src/modules/units/units.module.ts b/apps/api/src/modules/units/units.module.ts
+index 38bec33..b27ab51 100644
+--- a/apps/api/src/modules/units/units.module.ts
++++ b/apps/api/src/modules/units/units.module.ts
+@@ -13,6 +13,7 @@ import { CurrentUser } from '../../common/decorators/current-user.decorator';
+ import { JwtPayload } from '@hvacflow/shared-types';
+ import { WorkflowProgressModule } from '../workflow-progress/workflow-progress.module';
+ import { RealtimeModule } from '../realtime/realtime.module';
++import { ActivityLogModule } from '../activity-log/activity-log.module';
+ import { PaginationQueryDto } from '../../common/dto/pagination.dto';
+ import { UnitStatus } from '@prisma/client';
+ 
+@@ -80,11 +81,11 @@ export class UnitsController {
+ 
+   @Post('units/:id/engineering/advance')
+   @RequirePermissions('unit:manage')
+-  advanceEngineering(@Param('id') id: string) { return this.service.advanceEngineering(id); }
++  advanceEngineering(@Param('id') id: string, @CurrentUser() user: JwtPayload) { return this.service.advanceEngineering(id, user.sub); }
+ 
+   @Post('units/:id/mark-planned')
+   @RequirePermissions('unit:plan')
+-  markPlanned(@Param('id') id: string) { return this.service.markPlanned(id); }
++  markPlanned(@Param('id') id: string, @CurrentUser() user: JwtPayload) { return this.service.markPlanned(id, user.sub); }
+ 
+   @Post('units/:id/release')
+   @RequirePermissions('unit:manage')
+@@ -92,11 +93,11 @@ export class UnitsController {
+ 
+   @Post('units/:id/start-manufacturing')
+   @RequirePermissions('task:start')
+-  startManufacturing(@Param('id') id: string) { return this.service.startManufacturing(id); }
++  startManufacturing(@Param('id') id: string, @CurrentUser() user: JwtPayload) { return this.service.startManufacturing(id, user.sub); }
+ 
+   @Post('units/:id/start-assembly')
+   @RequirePermissions('task:start')
+-  startAssembly(@Param('id') id: string, @Body() dto: StartAssemblyDto) { return this.service.startAssembly(id, dto.teamName); }
++  startAssembly(@Param('id') id: string, @Body() dto: StartAssemblyDto, @CurrentUser() user: JwtPayload) { return this.service.startAssembly(id, dto.teamName, user.sub); }
+ 
+   @Post('units/:id/comments')
+   @RequirePermissions('unit:view')
+@@ -124,8 +125,8 @@ export class UnitsController {
+ 
+   @Patch('units/:id')
+   @RequirePermissions('unit:manage')
+-  update(@Param('id') id: string, @Body() dto: UpdateUnitDto) {
+-    return this.service.update(id, dto);
++  update(@Param('id') id: string, @Body() dto: UpdateUnitDto, @CurrentUser() user: JwtPayload) {
++    return this.service.update(id, dto, user.sub);
+   }
+ 
+   @Delete('units/:id')
+@@ -142,7 +143,7 @@ export class UnitsController {
+ }
+ 
+ @Module({
+-  imports: [WorkflowProgressModule, RealtimeModule],
++  imports: [WorkflowProgressModule, RealtimeModule, ActivityLogModule],
+   controllers: [UnitsController],
+   providers: [UnitsService],
+   exports: [UnitsService],
+diff --git a/apps/api/src/modules/units/units.service.ts b/apps/api/src/modules/units/units.service.ts
+index 89c2c92..1a102ad 100644
+--- a/apps/api/src/modules/units/units.service.ts
++++ b/apps/api/src/modules/units/units.service.ts
+@@ -1,10 +1,11 @@
+ import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+-import { EngineeringStatus, Prisma, ProductionReleaseStatus, ProductionTask, UnitStatus } from '@prisma/client';
++import { EngineeringStatus, Prisma, ProductionReleaseStatus, ProductionTask, UnitStatus, ActivityAction } from '@prisma/client';
+ import { IsBoolean, IsDateString, IsInt, IsObject, IsOptional, IsString, IsUUID, IsUrl, Matches, Min } from 'class-validator';
+ import { TaskStatus } from '@hvacflow/shared-types';
+ import { PrismaService } from '../../common/prisma/prisma.service';
+ import { WorkflowProgressService } from '../workflow-progress/workflow-progress.service';
+ import { RealtimeGateway } from '../realtime/realtime.gateway';
++import { ActivityLogService } from '../activity-log/activity-log.module';
+ 
+ export class CreateUnitDto {
+   @IsUUID() unitTypeId: string;
+@@ -65,6 +66,7 @@ export class UnitsService {
+     private readonly prisma: PrismaService,
+     private readonly workflowProgress: WorkflowProgressService,
+     private readonly realtime: RealtimeGateway,
++    private readonly activityLog: ActivityLogService,
+   ) {}
+ 
+   private monthValue(value?: string) {
+@@ -281,6 +283,12 @@ export class UnitsService {
+       for (const comp of composition.filter((c) => !c.isOptional)) await this.createPartWithTasks(tx, newUnit.id, comp.partTypeId, comp.defaultQuantity, priority.id, userId);
+       return newUnit;
+     });
++    await this.activityLog.log({
++      unitId: unit.id,
++      userId,
++      action: ActivityAction.UnitCreated,
++      description: `Unit ${unit.serialNumber} created`,
++    });
+     return this.findOne(unit.id);
+   }
+ 
+@@ -298,12 +306,19 @@ export class UnitsService {
+     return this.prisma.unit.update({ where: { id }, data: { productionMonth: this.monthValue(dto.productionMonth), priorityPosition: dto.priorityPosition }, include: this.unitSummaryInclude() });
+   }
+ 
+-  async advanceEngineering(id: string) {
++  async advanceEngineering(id: string, userId: string) {
+     const unit = await this.findOne(id);
+     const currentIndex = ENGINEERING_SEQUENCE.indexOf(unit.engineeringStatus);
+     if (currentIndex < 0 || currentIndex === ENGINEERING_SEQUENCE.length - 1) throw new ConflictException('Engineering workflow is already complete');
+     const next = ENGINEERING_SEQUENCE[currentIndex + 1];
+-    return this.prisma.unit.update({ where: { id }, data: { engineeringStatus: next, currentStage: next === EngineeringStatus.ReleasedToManufacturing ? 'Awaiting production release' : 'Detailing' }, include: this.unitSummaryInclude() });
++    const updated = await this.prisma.unit.update({ where: { id }, data: { engineeringStatus: next, currentStage: next === EngineeringStatus.ReleasedToManufacturing ? 'Awaiting production release' : 'Detailing' }, include: this.unitSummaryInclude() });
++    await this.activityLog.log({
++      unitId: id,
++      userId,
++      action: ActivityAction.EngineeringAdvanced,
++      description: `Engineering stage advanced to ${next}`,
++    });
++    return updated;
+   }
+ 
+   // Planner's queue: engineering-released units that haven't been marked
+@@ -359,17 +374,24 @@ export class UnitsService {
+     return { wip, upcoming };
+   }
+ 
+-  async markPlanned(id: string) {
++  async markPlanned(id: string, userId: string) {
+     const unit = await this.prisma.unit.findUnique({ where: { id }, include: { parts: { where: { deletedAt: null } } } });
+     if (!unit) throw new NotFoundException('Unit not found');
+     if (unit.engineeringStatus !== EngineeringStatus.ReleasedToManufacturing) throw new ConflictException('Engineering must release this unit before it can be planned');
+     if (unit.productionReleaseStatus !== ProductionReleaseStatus.AwaitingRelease) throw new ConflictException('Unit is already planned or released');
+     if (unit.parts.length === 0) throw new ConflictException('Add at least one part before releasing to the Production Manager');
+-    return this.prisma.unit.update({
++    const updated = await this.prisma.unit.update({
+       where: { id },
+       data: { productionReleaseStatus: ProductionReleaseStatus.Planned },
+       include: this.unitSummaryInclude(),
+     });
++    await this.activityLog.log({
++      unitId: id,
++      userId,
++      action: ActivityAction.UnitPlanned,
++      description: `Parts assigned (${unit.parts.length}) and released to the Production Manager`,
++    });
++    return updated;
+   }
+ 
+   async releaseToProduction(id: string, userId: string) {
+@@ -381,7 +403,7 @@ export class UnitsService {
+       where: { isActive: true, OR: [{ code: { equals: 'FAB', mode: 'insensitive' } }, { name: { equals: 'Fabrication', mode: 'insensitive' } }] },
+     });
+     if (!fabrication) throw new ConflictException('Create an active Fabrication department before releasing units');
+-    return this.prisma.unit.update({
++    const updated = await this.prisma.unit.update({
+       where: { id },
+       data: {
+         productionReleaseStatus: ProductionReleaseStatus.Released,
+@@ -392,9 +414,16 @@ export class UnitsService {
+       },
+       include: this.unitSummaryInclude(),
+     });
++    await this.activityLog.log({
++      unitId: id,
++      userId,
++      action: ActivityAction.UnitReleasedToProduction,
++      description: `Released to Production - now waiting for ${fabrication.name}`,
++    });
++    return updated;
+   }
+ 
+-  async startManufacturing(id: string) {
++  async startManufacturing(id: string, userId: string) {
+     const unit = await this.findOne(id);
+     if (unit.productionReleaseStatus !== ProductionReleaseStatus.Released) throw new ConflictException('Manager must release this unit before manufacturing can start');
+     const firstTasks = unit.parts.map((part) => part.tasks.find((task) => task.status === TaskStatus.Pending)).filter(Boolean);
+@@ -403,6 +432,12 @@ export class UnitsService {
+       const firstDepartmentId = firstTasks[0]?.departmentId ?? unit.currentDepartmentId;
+       await tx.unit.update({ where: { id }, data: { productionReleaseStatus: ProductionReleaseStatus.Started, manufacturingStartedAt: new Date(), status: UnitStatus.InProgress, currentDepartmentId: firstDepartmentId, currentStage: firstTasks[0]?.processDefinition?.name ?? 'Manufacturing' } });
+     });
++    await this.activityLog.log({
++      unitId: id,
++      userId,
++      action: ActivityAction.ManufacturingStarted,
++      description: 'Manufacturing started - first routed steps are ready',
++    });
+     return this.findOne(id);
+   }
+ 
+@@ -412,23 +447,50 @@ export class UnitsService {
+   // finished, since parts can be arriving from multiple sources
+   // (Fabrication tasks, vendor parts) concurrently by the time Assembly
+   // is ready to begin.
+-  async startAssembly(id: string, teamName: string) {
++  async startAssembly(id: string, teamName: string, userId: string) {
+     const unit = await this.findOne(id);
+     if (unit.assemblyStartedAt) throw new ConflictException('Assembly has already started for this unit');
+     await this.prisma.unit.update({
+       where: { id },
+       data: { assignedTeamName: teamName, assemblyStartedAt: new Date() },
+     });
++    await this.activityLog.log({
++      unitId: id,
++      userId,
++      action: ActivityAction.AssemblyStarted,
++      description: `Assembly build started - team ${teamName}`,
++    });
+     return this.findOne(id);
+   }
+ 
+-  async update(id: string, dto: UpdateUnitDto) {
+-    await this.findOne(id);
++  async update(id: string, dto: UpdateUnitDto, userId?: string) {
++    const before = await this.findOne(id);
+     const data: Prisma.UnitUpdateInput = { serialNumber: dto.serialNumber, displayName: dto.displayName, status: dto.status, currentStage: dto.currentStage, isBlocked: dto.isBlocked, holdReason: dto.holdReason, oneDriveFolderUrl: dto.oneDriveFolderUrl, priorityPosition: dto.priorityPosition, productionMonth: dto.productionMonth ? this.monthValue(dto.productionMonth) : undefined, dueDate: dto.dueDate ? new Date(dto.dueDate) : undefined, specifications: dto.specifications as Prisma.InputJsonValue | undefined, unitType: dto.unitTypeId ? { connect: { id: dto.unitTypeId } } : undefined, priorityLevel: dto.priorityLevelId ? { connect: { id: dto.priorityLevelId } } : undefined, currentDepartment: dto.currentDepartmentId ? { connect: { id: dto.currentDepartmentId } } : undefined };
+-    return this.prisma.unit.update({ where: { id }, data, include: this.unitSummaryInclude() });
++    const updated = await this.prisma.unit.update({ where: { id }, data, include: this.unitSummaryInclude() });
++    if (dto.isBlocked !== undefined && dto.isBlocked !== before.isBlocked) {
++      await this.activityLog.log({
++        unitId: id,
++        userId,
++        action: dto.isBlocked ? ActivityAction.UnitBlocked : ActivityAction.UnitUnblocked,
++        description: dto.isBlocked ? `Blocked${dto.holdReason ? `: ${dto.holdReason}` : ''}` : 'Hold removed',
++      });
++    }
++    return updated;
+   }
+ 
+-  async addComment(id: string, dto: AddUnitCommentDto, userId: string) { await this.findOne(id); return this.prisma.unitComment.create({ data: { unitId: id, userId, message: dto.message, isDelay: dto.isDelay ?? false }, include: { user: { select: { id: true, name: true, email: true } } } }); }
++  async addComment(id: string, dto: AddUnitCommentDto, userId: string) {
++    await this.findOne(id);
++    const comment = await this.prisma.unitComment.create({ data: { unitId: id, userId, message: dto.message, isDelay: dto.isDelay ?? false }, include: { user: { select: { id: true, name: true, email: true } } } });
++    if (dto.isDelay) {
++      await this.activityLog.log({
++        unitId: id,
++        userId,
++        action: ActivityAction.DelayReported,
++        description: dto.message,
++      });
++    }
++    return comment;
++  }
+   async remove(id: string) { await this.findOne(id); const count = await this.prisma.productionTask.count({ where: { OR: [{ unitId: id }, { part: { unitId: id } }], status: { in: ['InProgress', 'PendingVerification'] } } }); if (count) throw new ConflictException('Cannot delete unit with tasks in progress'); return this.prisma.unit.update({ where: { id }, data: { deletedAt: new Date() } }); }
+   async getAllTasks(unitId: string) { await this.findOne(unitId); return this.prisma.productionTask.findMany({ where: { OR: [{ unitId }, { part: { unitId } }] }, include: { processDefinition: { include: { department: true } }, department: true, priorityLevel: true, assignedUser: { select: { id: true, name: true, email: true } }, part: { include: { partType: true } } }, orderBy: [{ part: { identifier: 'asc' } }, { sequenceOrder: 'asc' }] }); }
+ 
+diff --git a/apps/api/src/modules/vendor-parts/vendor-parts.module.ts b/apps/api/src/modules/vendor-parts/vendor-parts.module.ts
+index 4be51f9..4f7f4ff 100644
+--- a/apps/api/src/modules/vendor-parts/vendor-parts.module.ts
++++ b/apps/api/src/modules/vendor-parts/vendor-parts.module.ts
+@@ -5,10 +5,12 @@ import {
+ } from '@nestjs/common';
+ import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
+ import { IsString, IsOptional, IsBoolean, IsUUID, IsDateString } from 'class-validator';
++import { ActivityAction } from '@prisma/client';
+ import { PrismaService } from '../../common/prisma/prisma.service';
+ import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
+ import { CurrentUser } from '../../common/decorators/current-user.decorator';
+ import { JwtPayload } from '@hvacflow/shared-types';
++import { ActivityLogModule, ActivityLogService } from '../activity-log/activity-log.module';
+ 
+ // ─── DTOs ─────────────────────────────────────────────────────────────────────
+ 
+@@ -29,7 +31,10 @@ class UpdateVendorPartDto {
+ 
+ @Injectable()
+ export class VendorPartsService {
+-  constructor(private readonly prisma: PrismaService) {}
++  constructor(
++    private readonly prisma: PrismaService,
++    private readonly activityLog: ActivityLogService,
++  ) {}
+ 
+   listByUnit(unitId: string) {
+     return this.prisma.vendorPart.findMany({
+@@ -43,7 +48,7 @@ export class VendorPartsService {
+     const unit = await this.prisma.unit.findUnique({ where: { id: unitId, deletedAt: null } });
+     if (!unit) throw new NotFoundException('Unit not found');
+ 
+-    return this.prisma.vendorPart.create({
++    const vendorPart = await this.prisma.vendorPart.create({
+       data: {
+         unitId,
+         partTypeId: dto.partTypeId,
+@@ -57,14 +62,21 @@ export class VendorPartsService {
+       },
+       include: { partType: true, addedByUser: { select: { id: true, name: true } } },
+     });
++    await this.activityLog.log({
++      unitId,
++      userId,
++      action: dto.isReceived ? ActivityAction.VendorPartReceived : ActivityAction.VendorPartLogged,
++      description: dto.isReceived ? `${vendorPart.partType.name} received` : `${vendorPart.partType.name} logged as needed from vendor`,
++    });
++    return vendorPart;
+   }
+ 
+-  async update(id: string, dto: UpdateVendorPartDto) {
+-    const existing = await this.prisma.vendorPart.findUnique({ where: { id } });
++  async update(id: string, dto: UpdateVendorPartDto, userId?: string) {
++    const existing = await this.prisma.vendorPart.findUnique({ where: { id }, include: { partType: true } });
+     if (!existing) throw new NotFoundException('Vendor part not found');
+ 
+     const isReceived = dto.isReceived ?? existing.isReceived;
+-    return this.prisma.vendorPart.update({
++    const updated = await this.prisma.vendorPart.update({
+       where: { id },
+       data: {
+         ...(dto.isReceived !== undefined ? { isReceived: dto.isReceived } : {}),
+@@ -78,6 +90,18 @@ export class VendorPartsService {
+       },
+       include: { partType: true, addedByUser: { select: { id: true, name: true } } },
+     });
++    // Only log the meaningful transition (newly marked received), not
++    // every date-only edit - that would flood the timeline with noise
++    // every time a date gets adjusted for a delay.
++    if (dto.isReceived === true && !existing.isReceived) {
++      await this.activityLog.log({
++        unitId: existing.unitId,
++        userId,
++        action: ActivityAction.VendorPartReceived,
++        description: `${existing.partType.name} received`,
++      });
++    }
++    return updated;
+   }
+ 
+   async remove(id: string) {
+@@ -109,8 +133,8 @@ export class VendorPartsController {
+ 
+   @Patch('vendor-parts/:id')
+   @RequirePermissions('vendor-part:manage')
+-  update(@Param('id') id: string, @Body() dto: UpdateVendorPartDto) {
+-    return this.service.update(id, dto);
++  update(@Param('id') id: string, @Body() dto: UpdateVendorPartDto, @CurrentUser() user: JwtPayload) {
++    return this.service.update(id, dto, user.sub);
+   }
+ 
+   @Delete('vendor-parts/:id')
+@@ -123,6 +147,7 @@ export class VendorPartsController {
+ // ─── Module ───────────────────────────────────────────────────────────────────
+ 
+ @Module({
++  imports: [ActivityLogModule],
+   controllers: [VendorPartsController],
+   providers: [VendorPartsService],
+   exports: [VendorPartsService],
+diff --git a/apps/web/src/app/(dashboard)/units/[id]/page.tsx b/apps/web/src/app/(dashboard)/units/[id]/page.tsx
+index dd5b1a6..c435dc0 100644
+--- a/apps/web/src/app/(dashboard)/units/[id]/page.tsx
++++ b/apps/web/src/app/(dashboard)/units/[id]/page.tsx
+@@ -6,7 +6,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+ import { api } from '@/lib/api';
+ import { useAuthStore } from '@/store/auth.store';
+ import { PageHeader, Button, EmptyState, Spinner, Modal, Input, Select, Card, ProgressBar, Textarea, Badge } from '@/components/shared';
+-import { Plus, Package, ChevronRight, CheckCircle, Circle, Clock, AlertCircle, ExternalLink, MessageSquare, AlertTriangle } from 'lucide-react';
++import { Plus, Package, ChevronRight, CheckCircle, Circle, Clock, AlertCircle, ExternalLink, MessageSquare, AlertTriangle, History } from 'lucide-react';
+ import Link from 'next/link';
+ import { toast } from '@/components/shared';
+ import { cn, PART_STATUS_BG, STATUS_BG, STATUS_LABELS } from '@/lib/utils';
+@@ -33,6 +33,11 @@ export default function UnitDetailPage() {
+     queryFn: () => api.units.get(id),
+   });
+ 
++  const { data: activity = [] } = useQuery({
++    queryKey: ['unit', id, 'activity'],
++    queryFn: () => api.units.activity(id),
++  });
++
+   const { data: partTypes } = useQuery({
+     queryKey: ['part-types'],
+     queryFn: () => api.partTypes.list({ isActive: true }),
+@@ -171,6 +176,28 @@ export default function UnitDetailPage() {
+               {!unit.comments?.length && <p className="text-xs text-muted-foreground">No comments yet.</p>}
+             </div>
+           </Card>
++
++          <Card className="p-4">
++            <div className="flex items-center gap-2 mb-4"><History className="w-4 h-4" /><h2 className="text-sm font-semibold">Activity timeline</h2></div>
++            {activity.length === 0 ? (
++              <p className="text-xs text-muted-foreground">Nothing recorded yet.</p>
++            ) : (
++              <div className="space-y-0 max-h-96 overflow-y-auto">
++                {activity.map((entry: any, index: number) => (
++                  <div key={entry.id} className="relative pl-6 pb-4">
++                    {index < activity.length - 1 && (
++                      <div className="absolute left-[7px] top-3 bottom-0 w-px bg-border" />
++                    )}
++                    <div className="absolute left-0 top-1 w-3.5 h-3.5 rounded-full border-2 border-primary bg-card" />
++                    <p className="text-sm text-foreground">{entry.description}</p>
++                    <p className="text-xs text-muted-foreground mt-0.5">
++                      {entry.user?.name ?? 'System'} · {new Date(entry.createdAt).toLocaleString()}
++                    </p>
++                  </div>
++                ))}
++              </div>
++            )}
++          </Card>
+         </div>
+ 
+         {/* Parts */}
+diff --git a/apps/web/src/lib/api.ts b/apps/web/src/lib/api.ts
+index 4237527..c92c367 100644
+--- a/apps/web/src/lib/api.ts
++++ b/apps/web/src/lib/api.ts
+@@ -312,6 +312,7 @@ export const api = {
+     engineeringQueue: () => api.get<any[]>('/units/engineering-queue'),
+     plannerQueue: () => api.get<any[]>('/units/planner-queue'),
+     assemblySummary: () => api.get<{ wip: any[]; upcoming: any[] }>('/units/assembly-summary'),
++    activity: (id: string) => api.get<any[]>(`/units/${id}/activity`),
+     markPlanned: (id: string) => api.post<any>(`/units/${id}/mark-planned`, {}),
+     startAssembly: (id: string, teamName: string) => api.post<any>(`/units/${id}/start-assembly`, { teamName }),
+     listByOrder: (orderId: string, params?: any) =>
+diff --git a/prisma/migrations/20260716120000_add_activity_log/migration.sql b/prisma/migrations/20260716120000_add_activity_log/migration.sql
+new file mode 100644
+index 0000000..5cba343
+--- /dev/null
++++ b/prisma/migrations/20260716120000_add_activity_log/migration.sql
+@@ -0,0 +1,31 @@
++-- Unified unit activity timeline.
++CREATE TYPE "ActivityAction" AS ENUM (
++  'UnitCreated',
++  'EngineeringAdvanced',
++  'UnitPlanned',
++  'UnitReleasedToProduction',
++  'ManufacturingStarted',
++  'AssemblyStarted',
++  'TaskCompleted',
++  'DelayReported',
++  'VendorPartReceived',
++  'VendorPartLogged',
++  'UnitBlocked',
++  'UnitUnblocked'
++);
++
++CREATE TABLE "activity_logs" (
++  "id" TEXT NOT NULL,
++  "unitId" TEXT NOT NULL,
++  "userId" TEXT,
++  "action" "ActivityAction" NOT NULL,
++  "description" TEXT NOT NULL,
++  "metadata" JSONB,
++  "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
++  CONSTRAINT "activity_logs_pkey" PRIMARY KEY ("id")
++);
++
++CREATE INDEX "activity_logs_unitId_createdAt_idx" ON "activity_logs"("unitId", "createdAt");
++
++ALTER TABLE "activity_logs" ADD CONSTRAINT "activity_logs_unitId_fkey" FOREIGN KEY ("unitId") REFERENCES "units"("id") ON DELETE CASCADE ON UPDATE CASCADE;
++ALTER TABLE "activity_logs" ADD CONSTRAINT "activity_logs_userId_fkey" FOREIGN KEY ("userId") REFERENCES "users"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+diff --git a/prisma/schema.prisma b/prisma/schema.prisma
+index 28ef008..7bc3195 100644
+--- a/prisma/schema.prisma
++++ b/prisma/schema.prisma
+@@ -103,6 +103,7 @@ model User {
+   createdParts            Part[]
+   unitComments            UnitComment[]
+   vendorParts             VendorPart[]
++  activityLogs            ActivityLog[]
+ 
+   @@map("users")
+ }
+@@ -342,6 +343,7 @@ model Unit {
+   tasks             ProductionTask[] @relation("UnitTasks")
+   comments          UnitComment[]
+   vendorParts       VendorPart[]
++  activityLogs      ActivityLog[]
+ 
+   @@index([orderId])
+   @@index([priorityLevelId])
+@@ -355,6 +357,43 @@ model Unit {
+   @@map("units")
+ }
+ 
++// Unified, unit-level "what happened and when" timeline - the single
++// source of truth an audit trail needs, instead of scattered signals
++// (task.completedAt, unit comments, etc.) that each only tell part of
++// the story. Every meaningful business event on a unit gets one entry
++// here, in plain language, so a manager or director can see the whole
++// history of a unit in one place without cross-referencing five pages.
++enum ActivityAction {
++  UnitCreated
++  EngineeringAdvanced
++  UnitPlanned
++  UnitReleasedToProduction
++  ManufacturingStarted
++  AssemblyStarted
++  TaskCompleted
++  DelayReported
++  VendorPartReceived
++  VendorPartLogged
++  UnitBlocked
++  UnitUnblocked
++}
++
++model ActivityLog {
++  id          String         @id @default(uuid())
++  unitId      String
++  userId      String?
++  action      ActivityAction
++  description String
++  metadata    Json?
++  createdAt   DateTime       @default(now())
++
++  unit Unit  @relation(fields: [unitId], references: [id], onDelete: Cascade)
++  user User? @relation(fields: [userId], references: [id])
++
++  @@index([unitId, createdAt])
++  @@map("activity_logs")
++}
++
+ model UnitComment {
+   id        String   @id @default(uuid())
+   unitId    String
+-- 
+2.43.0
+

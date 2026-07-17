@@ -1,0 +1,87 @@
+From a66f3731cf74df0f14de406c7fec8c078eb0aa32 Mon Sep 17 00:00:00 2001
+From: Claude <claude@anthropic.com>
+Date: Thu, 16 Jul 2026 11:24:27 +0000
+Subject: [PATCH] Fix Rules of Hooks violation: departmentLinks useQuery called
+ after an early return
+
+Reported live by the user via React's own error overlay: 'Rendered more
+hooks than during the previous render' / 'React has detected a change
+in the order of Hooks called by DashboardLayout', pointing straight at
+layout.tsx:104.
+
+Root cause: the departmentLinks useQuery (added for the admin
+per-department sidebar shortcuts) was placed AFTER the
+'if (!isAuthenticated || !user) return <spinner>' guard. On renders
+where that guard fires (auth still loading), the component returns
+before ever reaching the useQuery call - fewer hooks called that
+render. Once auth resolves and the guard stops firing, the component
+proceeds past it and does call the hook - more hooks called than
+before. Hooks must be called in the same order and count on every
+render regardless of any conditional logic in the component body -
+placing a hook after a possible early return breaks that outright.
+
+Fixed by moving canManageConfig and the useQuery call above the guard,
+alongside every other hook in the component. hasPermission() already
+handles a null user safely (optional-chains to false), so this is safe
+to call before the auth-loaded check.
+---
+ apps/web/src/app/(dashboard)/layout.tsx | 30 ++++++++++++++++---------
+ 1 file changed, 20 insertions(+), 10 deletions(-)
+
+diff --git a/apps/web/src/app/(dashboard)/layout.tsx b/apps/web/src/app/(dashboard)/layout.tsx
+index 377df46..6b19969 100644
+--- a/apps/web/src/app/(dashboard)/layout.tsx
++++ b/apps/web/src/app/(dashboard)/layout.tsx
+@@ -85,22 +85,21 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
+     }
+   }, [isAuthenticated, user, router, loadMe]);
+ 
+-  if (!isAuthenticated || !user) {
+-    return (
+-      <div className="min-h-screen flex items-center justify-center bg-background">
+-        <div className="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+-      </div>
+-    );
+-  }
+-
+   const canManageConfig = hasPermission('config:manage');
+-  const isConfigActive = pathname.startsWith('/config');
+-  const visibleNavItems = navItems.filter((item: any) => !item.permission || hasPermission(item.permission));
+ 
+   // Admins get a shortcut to every department's live Mission Control
+   // board, in department sortOrder - not a separate page per department
+   // (that duplicated a lot of UI before), just Mission Control
+   // pre-filtered via query param.
++  //
++  // This MUST be called unconditionally, before the early return below -
++  // a hook called only after an early-return guard gets skipped entirely
++  // on renders where that guard fires (e.g. while auth is still
++  // loading), then gets called on renders where it doesn't. That changes
++  // the number/order of hooks between renders, which is exactly what
++  // React's "Rendered more hooks than during the previous render" error
++  // is about - it was placed after the guard before, which is what
++  // caused it.
+   const { data: departmentLinks = [] } = useQuery({
+     queryKey: ['departments'],
+     queryFn: () => api.departments.list({ isActive: true }),
+@@ -108,6 +107,17 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
+     staleTime: 60_000,
+   });
+ 
++  if (!isAuthenticated || !user) {
++    return (
++      <div className="min-h-screen flex items-center justify-center bg-background">
++        <div className="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin" />
++      </div>
++    );
++  }
++
++  const isConfigActive = pathname.startsWith('/config');
++  const visibleNavItems = navItems.filter((item: any) => !item.permission || hasPermission(item.permission));
++
+   return (
+     <div className="flex h-screen bg-background overflow-hidden">
+       {/* ─── Desktop Sidebar ─────────────────────────────────────── */}
+-- 
+2.43.0
+

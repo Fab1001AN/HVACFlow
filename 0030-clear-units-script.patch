@@ -1,0 +1,104 @@
+From 18ad357a70953c3c94a3601b1136c1d011806221 Mon Sep 17 00:00:00 2001
+From: Claude <claude@anthropic.com>
+Date: Fri, 17 Jul 2026 12:08:37 +0000
+Subject: [PATCH] Add safe script to clear all units for a fresh start
+
+New prisma/clear-units.ts + npm run db:clear-units. Deletes
+ProductionTask -> Part -> Unit in that specific order (not arbitrary):
+Part.unitId is a required field with no cascade configured, and
+ProductionTask's links to Part/Unit are optional with Prisma's default
+behavior being to silently null them out rather than delete - clearing
+tasks last would leave invisible orphaned rows with no part/unit
+reference at all. Everything with an explicit onDelete: Cascade to
+Unit (comments, vendor parts, activity log, rework, shipment records)
+gets cleaned up automatically by Postgres once Unit rows are deleted,
+no separate step needed for those.
+
+Does not touch configuration - departments, process definitions, part
+types, unit types, priority levels, roles/permissions, users, and
+workflow stages all stay exactly as they are. Orders are also
+untouched (Unit references Order, not the other way around).
+
+Reports counts of what was actually deleted rather than just
+succeeding silently, so this can be confirmed rather than trusted.
+---
+ package.json          |  1 +
+ prisma/clear-units.ts | 54 +++++++++++++++++++++++++++++++++++++++++++
+ 2 files changed, 55 insertions(+)
+ create mode 100644 prisma/clear-units.ts
+
+diff --git a/package.json b/package.json
+index 37dac0f..5d48ae2 100644
+--- a/package.json
++++ b/package.json
+@@ -17,6 +17,7 @@
+     "db:migrate": "prisma migrate dev --schema=./prisma/schema.prisma",
+     "db:migrate:deploy": "prisma migrate deploy --schema=./prisma/schema.prisma",
+     "db:seed": "ts-node --project tsconfig.seed.json prisma/seed.ts",
++    "db:clear-units": "ts-node --project tsconfig.seed.json prisma/clear-units.ts",
+     "db:studio": "prisma studio --schema=./prisma/schema.prisma",
+     "db:reset": "prisma migrate reset --schema=./prisma/schema.prisma",
+     "build:shared": "npm --workspace @hvacflow/shared-types run build",
+diff --git a/prisma/clear-units.ts b/prisma/clear-units.ts
+new file mode 100644
+index 0000000..d26267d
+--- /dev/null
++++ b/prisma/clear-units.ts
+@@ -0,0 +1,54 @@
++/**
++ * Clears every unit and everything attached to it - parts, production
++ * tasks, comments, vendor parts, activity logs, rework records,
++ * shipment records - so you can start fresh with new units.
++ *
++ * Does NOT touch any configuration: departments, process definitions,
++ * part types, unit types, priority levels, roles/permissions, users,
++ * or workflow stages all stay exactly as they are. Orders are also
++ * untouched (Unit references Order, not the other way around, so
++ * clearing units has no effect on them).
++ *
++ * Order matters here and isn't arbitrary:
++ *   1. ProductionTask first - Part.unitId is a REQUIRED field with no
++ *      cascade configured, and ProductionTask's own links to Part/Unit
++ *      are optional with Prisma's default behavior (silently set to
++ *      null, not deleted) - deleting tasks last would leave orphaned
++ *      rows with no part/unit reference at all, invisible garbage in
++ *      the database.
++ *   2. Part second - same reasoning, clears the required Unit link
++ *      before Unit rows go away.
++ *   3. Unit last - everything with an explicit onDelete: Cascade to
++ *      Unit (comments, vendor parts, activity log, rework, shipment
++ *      records) is cleaned up automatically by Postgres at this step,
++ *      no separate delete needed for those.
++ *
++ * Run with: npx ts-node --project tsconfig.seed.json prisma/clear-units.ts
++ */
++import { PrismaClient } from '@prisma/client';
++
++const prisma = new PrismaClient();
++
++async function main() {
++  console.log('Clearing all units and everything linked to them...\n');
++
++  const taskCount = await prisma.productionTask.deleteMany({});
++  console.log(`  Deleted ${taskCount.count} production task(s)`);
++
++  const partCount = await prisma.part.deleteMany({});
++  console.log(`  Deleted ${partCount.count} part(s)`);
++
++  const unitCount = await prisma.unit.deleteMany({});
++  console.log(`  Deleted ${unitCount.count} unit(s) (comments, vendor parts, activity logs, rework, and shipment records for these were removed automatically along with them)`);
++
++  console.log('\nDone. Configuration (departments, processes, part types, unit types, roles, users, workflow stages) was not touched.');
++}
++
++main()
++  .catch((err) => {
++    console.error('Failed:', err);
++    process.exit(1);
++  })
++  .finally(async () => {
++    await prisma.$disconnect();
++  });
+-- 
+2.43.0
+

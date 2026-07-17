@@ -1,0 +1,239 @@
+From 42cd7faf1dcb38ad9353213186f9797e009cb430 Mon Sep 17 00:00:00 2001
+From: Claude <claude@anthropic.com>
+Date: Fri, 17 Jul 2026 12:18:08 +0000
+Subject: [PATCH] Add Delete Unit and Delete Part buttons - the backend
+ protection already existed, nothing called it
+
+Both DELETE /units/:id and DELETE /parts/:id already existed and were
+already properly protected (blocked with a clear error if the unit/
+part has any in-progress, pending-verification, or completed work) -
+but grep confirmed zero frontend usage of either endpoint anywhere in
+the app. The safety net existed; there was genuinely no door to walk
+through it.
+
+Unit detail page: "Delete Unit" in the header (unit:manage), confirms
+before deleting, navigates back to Production Calendar on success.
+Each part in the Parts list gets its own delete button (part:manage),
+confirms before deleting, doesn't touch the rest of the page.
+
+Planner Dashboard: each part chip on a unit card gets a small X to
+remove it - this is genuinely the most likely place a mistake actually
+happens (dragging the wrong part type onto a unit), so it gets its own
+direct undo right where the mistake occurs, not just on the unit
+detail page.
+
+Both soft-delete (deletedAt), consistent with how deletion already
+works everywhere else in this app - recoverable, not a hard delete.
+---
+ .../(dashboard)/planner-dashboard/page.tsx    | 26 ++++++
+ .../src/app/(dashboard)/units/[id]/page.tsx   | 83 +++++++++++++++++--
+ apps/web/src/lib/api.ts                       |  2 +
+ 3 files changed, 102 insertions(+), 9 deletions(-)
+
+diff --git a/apps/web/src/app/(dashboard)/planner-dashboard/page.tsx b/apps/web/src/app/(dashboard)/planner-dashboard/page.tsx
+index a3426ff..9758fd0 100644
+--- a/apps/web/src/app/(dashboard)/planner-dashboard/page.tsx
++++ b/apps/web/src/app/(dashboard)/planner-dashboard/page.tsx
+@@ -44,6 +44,19 @@ export default function PlannerDashboardPage() {
+     onError: (e: any) => toast(e.message ?? 'Could not add part', 'error'),
+   });
+ 
++  // For undoing a mis-dropped part right after dragging it on - backend
++  // blocks this the same way if the part has any real work (completed
++  // or in-progress task) already, so this is only ever a "created by
++  // mistake, nothing happened yet" undo, not a way to erase real work.
++  const deletePartMutation = useMutation({
++    mutationFn: (partId: string) => api.parts.delete(partId),
++    onSuccess: () => {
++      queryClient.invalidateQueries({ queryKey: ['units', 'planner-queue'] });
++      toast('Part removed', 'success');
++    },
++    onError: (e: any) => toast(e.message ?? 'Could not delete part', 'error'),
++  });
++
+   const releaseMutation = useMutation({
+     mutationFn: (id: string) => api.units.markPlanned(id),
+     onSuccess: () => {
+@@ -178,6 +191,19 @@ export default function PlannerDashboardPage() {
+                                 <span key={part.id} className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-secondary text-xs">
+                                   <Package className="w-3 h-3 text-muted-foreground" />
+                                   {part.partType?.name ?? part.identifier}
++                                  <button
++                                    type="button"
++                                    title="Remove this part"
++                                    disabled={deletePartMutation.isPending && deletePartMutation.variables === part.id}
++                                    onClick={() => {
++                                      if (confirm(`Remove ${part.partType?.name ?? part.identifier} from this unit? Only do this if it was added by mistake.`)) {
++                                        deletePartMutation.mutate(part.id);
++                                      }
++                                    }}
++                                    className="ml-0.5 text-muted-foreground hover:text-destructive transition-colors"
++                                  >
++                                    <X className="w-3 h-3" />
++                                  </button>
+                                 </span>
+                               ))}
+                             </div>
+diff --git a/apps/web/src/app/(dashboard)/units/[id]/page.tsx b/apps/web/src/app/(dashboard)/units/[id]/page.tsx
+index 7524c3d..2569371 100644
+--- a/apps/web/src/app/(dashboard)/units/[id]/page.tsx
++++ b/apps/web/src/app/(dashboard)/units/[id]/page.tsx
+@@ -1,12 +1,12 @@
+ 'use client';
+ 
+ import { useState } from 'react';
+-import { useParams } from 'next/navigation';
++import { useParams, useRouter } from 'next/navigation';
+ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+ import { api } from '@/lib/api';
+ import { useAuthStore } from '@/store/auth.store';
+ import { PageHeader, Button, EmptyState, Spinner, Modal, Input, Select, Card, ProgressBar, Textarea, Badge } from '@/components/shared';
+-import { Plus, Package, ChevronRight, CheckCircle, Circle, Clock, AlertCircle, ExternalLink, MessageSquare, AlertTriangle, History, Workflow, Wrench, Truck } from 'lucide-react';
++import { Plus, Package, ChevronRight, CheckCircle, Circle, Clock, AlertCircle, ExternalLink, MessageSquare, AlertTriangle, History, Workflow, Wrench, Truck, Trash2 } from 'lucide-react';
+ import Link from 'next/link';
+ import { toast } from '@/components/shared';
+ import { cn, PART_STATUS_BG, STATUS_BG, STATUS_LABELS } from '@/lib/utils';
+@@ -18,6 +18,7 @@ import { useWsEvent, useSubscribeUnit } from '@/lib/websocket';
+ 
+ export default function UnitDetailPage() {
+   const { id } = useParams<{ id: string }>();
++  const router = useRouter();
+   const queryClient = useQueryClient();
+   const { hasPermission } = useAuthStore();
+   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+@@ -120,6 +121,31 @@ export default function UnitDetailPage() {
+     onError: (err: any) => toast(err.message, 'error'),
+   });
+ 
++  // Backend already blocks this (ConflictException) if any task is
++  // in progress or pending verification - real work in flight always
++  // wins over "created by mistake." Soft delete (deletedAt), not a
++  // hard delete - recoverable if this turns out to be the wrong call.
++  const deleteUnitMutation = useMutation({
++    mutationFn: () => api.units.delete(id),
++    onSuccess: () => {
++      toast('Unit deleted', 'success');
++      router.push('/production-calendar');
++    },
++    onError: (err: any) => toast(err.message, 'error'),
++  });
++
++  // Backend blocks this the same way (ConflictException) if the part
++  // has any completed or in-progress task - a part that's actually
++  // been worked on is never a "delete by mistake" case anymore.
++  const deletePartMutation = useMutation({
++    mutationFn: (partId: string) => api.parts.delete(partId),
++    onSuccess: () => {
++      queryClient.invalidateQueries({ queryKey: ['unit', id] });
++      toast('Part deleted', 'success');
++    },
++    onError: (err: any) => toast(err.message, 'error'),
++  });
++
+   // New generic workflow engine (Step 2) - standalone from the existing
+   // Engineering/Planner/Manager/Assembly flow above. Exists here so it
+   // can actually be exercised end to end, not just CRUD'd in
+@@ -203,11 +229,27 @@ export default function UnitDetailPage() {
+           { label: unit.serialNumber },
+         ]}
+         action={
+-          hasPermission('part:manage') && (
+-            <Button leftIcon={<Plus className="w-3.5 h-3.5" />} onClick={() => setAddPartOpen(true)}>
+-              Add Part
+-            </Button>
+-          )
++          <div className="flex items-center gap-2">
++            {hasPermission('part:manage') && (
++              <Button leftIcon={<Plus className="w-3.5 h-3.5" />} onClick={() => setAddPartOpen(true)}>
++                Add Part
++              </Button>
++            )}
++            {hasPermission('unit:manage') && (
++              <Button
++                variant="destructive"
++                leftIcon={<Trash2 className="w-3.5 h-3.5" />}
++                loading={deleteUnitMutation.isPending}
++                onClick={() => {
++                  if (confirm(`Delete unit ${unit.serialNumber}? This can't be undone from here - only do this if it was created by mistake.`)) {
++                    deleteUnitMutation.mutate();
++                  }
++                }}
++              >
++                Delete Unit
++              </Button>
++            )}
++          </div>
+         }
+       />
+ 
+@@ -470,7 +512,14 @@ export default function UnitDetailPage() {
+           ) : (
+             <div className="space-y-2">
+               {unit.parts.map((part: any) => (
+-                <PartRow key={part.id} part={part} onTaskClick={setSelectedTaskId} />
++                <PartRow
++                  key={part.id}
++                  part={part}
++                  onTaskClick={setSelectedTaskId}
++                  onDelete={(partId) => deletePartMutation.mutate(partId)}
++                  canDelete={hasPermission('part:manage')}
++                  deleting={deletePartMutation.isPending && deletePartMutation.variables === part.id}
++                />
+               ))}
+             </div>
+           )}
+@@ -539,7 +588,7 @@ export default function UnitDetailPage() {
+   );
+ }
+ 
+-function PartRow({ part, onTaskClick }: { part: any; onTaskClick: (id: string) => void }) {
++function PartRow({ part, onTaskClick, onDelete, canDelete, deleting }: { part: any; onTaskClick: (id: string) => void; onDelete: (partId: string) => void; canDelete: boolean; deleting: boolean }) {
+   const [expanded, setExpanded] = useState(false);
+   const progress = Number(part.progressPercentage);
+ 
+@@ -560,6 +609,22 @@ function PartRow({ part, onTaskClick }: { part: any; onTaskClick: (id: string) =
+         <span className={cn('inline-flex items-center rounded-md px-2 py-0.5 text-xs font-medium flex-shrink-0', PART_STATUS_BG[part.status as PartStatus] ?? 'bg-muted text-muted-foreground')}>
+           {part.status}
+         </span>
++        {canDelete && (
++          <button
++            type="button"
++            title="Delete this part"
++            disabled={deleting}
++            onClick={(e) => {
++              e.stopPropagation();
++              if (confirm(`Delete part ${part.partType?.name} (${part.identifier})? Only do this if it was added by mistake.`)) {
++                onDelete(part.id);
++              }
++            }}
++            className="flex-shrink-0 p-1.5 rounded-md text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
++          >
++            <Trash2 className="w-3.5 h-3.5" />
++          </button>
++        )}
+       </button>
+ 
+       {expanded && part.tasks && (
+diff --git a/apps/web/src/lib/api.ts b/apps/web/src/lib/api.ts
+index 53e2235..54b5afa 100644
+--- a/apps/web/src/lib/api.ts
++++ b/apps/web/src/lib/api.ts
+@@ -341,6 +341,7 @@ export const api = {
+       api.get<any>(`/orders/${orderId}/units`, { params }),
+     get: (id: string) => api.get<any>(`/units/${id}`),
+     createDirect: (body: any) => api.post<any>('/units', body),
++    delete: (id: string) => api.delete(`/units/${id}`),
+     create: (orderId: string, body: any) =>
+       api.post<any>(`/orders/${orderId}/units`, body),
+     update: (id: string, body: any) => api.patch<any>(`/units/${id}`, body),
+@@ -362,6 +363,7 @@ export const api = {
+       api.post<any>(`/units/${unitId}/parts`, body),
+     update: (id: string, body: any) => api.patch<any>(`/parts/${id}`, body),
+     replaceRoute: (id: string, processDefinitionIds: string[], reason: string) => api.patch<any>(`/parts/${id}/route`, { processDefinitionIds, reason }),
++    delete: (id: string) => api.delete(`/parts/${id}`),
+   },
+ 
+   reworks: {
+-- 
+2.43.0
+

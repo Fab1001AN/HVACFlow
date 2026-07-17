@@ -277,7 +277,7 @@ export class UnitsService {
     if (!unitType) throw new NotFoundException('Unit type not found');
     const composition = await this.prisma.unitTypeComposition.findMany({ where: { unitTypeId: dto.unitTypeId, isActive: true }, orderBy: { sortOrder: 'asc' } });
     const unit = await this.prisma.$transaction(async (tx) => {
-      const newUnit = await tx.unit.create({ data: { unitTypeId: dto.unitTypeId, serialNumber: dto.serialNumber, displayName: dto.displayName, priorityLevelId: priority.id, productionMonth: this.monthValue(dto.productionMonth), dueDate: dto.dueDate ? new Date(dto.dueDate) : undefined, priorityPosition: dto.priorityPosition ?? 0, oneDriveFolderUrl: dto.oneDriveFolderUrl, specifications: dto.specifications as Prisma.InputJsonValue | undefined, currentStage: 'Engineering', createdByUserId: userId } });
+      const newUnit = await tx.unit.create({ data: { unitTypeId: dto.unitTypeId, serialNumber: dto.serialNumber, displayName: dto.displayName, priorityLevelId: priority.id, productionMonth: this.monthValue(dto.productionMonth), dueDate: dto.dueDate ? new Date(dto.dueDate) : undefined, priorityPosition: dto.priorityPosition ?? 0, oneDriveFolderUrl: dto.oneDriveFolderUrl, specifications: dto.specifications as Prisma.InputJsonValue | undefined, currentStage: 'Detailing', createdByUserId: userId } });
       for (const comp of composition.filter((c) => !c.isOptional)) await this.createPartWithTasks(tx, newUnit.id, comp.partTypeId, comp.defaultQuantity, priority.id, userId);
       return newUnit;
     });
@@ -303,7 +303,7 @@ export class UnitsService {
     const currentIndex = ENGINEERING_SEQUENCE.indexOf(unit.engineeringStatus);
     if (currentIndex < 0 || currentIndex === ENGINEERING_SEQUENCE.length - 1) throw new ConflictException('Engineering workflow is already complete');
     const next = ENGINEERING_SEQUENCE[currentIndex + 1];
-    return this.prisma.unit.update({ where: { id }, data: { engineeringStatus: next, currentStage: next === EngineeringStatus.ReleasedToManufacturing ? 'Awaiting production release' : 'Engineering' }, include: this.unitSummaryInclude() });
+    return this.prisma.unit.update({ where: { id }, data: { engineeringStatus: next, currentStage: next === EngineeringStatus.ReleasedToManufacturing ? 'Awaiting production release' : 'Detailing' }, include: this.unitSummaryInclude() });
   }
 
   // Planner's queue: engineering-released units that haven't been marked
