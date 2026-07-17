@@ -44,6 +44,19 @@ export default function PlannerDashboardPage() {
     onError: (e: any) => toast(e.message ?? 'Could not add part', 'error'),
   });
 
+  // For undoing a mis-dropped part right after dragging it on - backend
+  // blocks this the same way if the part has any real work (completed
+  // or in-progress task) already, so this is only ever a "created by
+  // mistake, nothing happened yet" undo, not a way to erase real work.
+  const deletePartMutation = useMutation({
+    mutationFn: (partId: string) => api.parts.delete(partId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['units', 'planner-queue'] });
+      toast('Part removed', 'success');
+    },
+    onError: (e: any) => toast(e.message ?? 'Could not delete part', 'error'),
+  });
+
   const releaseMutation = useMutation({
     mutationFn: (id: string) => api.units.markPlanned(id),
     onSuccess: () => {
@@ -178,6 +191,19 @@ export default function PlannerDashboardPage() {
                                 <span key={part.id} className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-secondary text-xs">
                                   <Package className="w-3 h-3 text-muted-foreground" />
                                   {part.partType?.name ?? part.identifier}
+                                  <button
+                                    type="button"
+                                    title="Remove this part"
+                                    disabled={deletePartMutation.isPending && deletePartMutation.variables === part.id}
+                                    onClick={() => {
+                                      if (confirm(`Remove ${part.partType?.name ?? part.identifier} from this unit? Only do this if it was added by mistake.`)) {
+                                        deletePartMutation.mutate(part.id);
+                                      }
+                                    }}
+                                    className="ml-0.5 text-muted-foreground hover:text-destructive transition-colors"
+                                  >
+                                    <X className="w-3 h-3" />
+                                  </button>
                                 </span>
                               ))}
                             </div>

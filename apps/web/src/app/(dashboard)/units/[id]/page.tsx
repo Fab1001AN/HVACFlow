@@ -1,12 +1,12 @@
 'use client';
 
 import { useState } from 'react';
-import { useParams } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { useAuthStore } from '@/store/auth.store';
 import { PageHeader, Button, EmptyState, Spinner, Modal, Input, Select, Card, ProgressBar, Textarea, Badge } from '@/components/shared';
-import { Plus, Package, ChevronRight, CheckCircle, Circle, Clock, AlertCircle, ExternalLink, MessageSquare, AlertTriangle, History, Workflow, Wrench, Truck } from 'lucide-react';
+import { Plus, Package, ChevronRight, CheckCircle, Circle, Clock, AlertCircle, ExternalLink, MessageSquare, AlertTriangle, History, Workflow, Wrench, Truck, Trash2 } from 'lucide-react';
 import Link from 'next/link';
 import { toast } from '@/components/shared';
 import { cn, PART_STATUS_BG, STATUS_BG, STATUS_LABELS } from '@/lib/utils';
@@ -18,6 +18,7 @@ import { useWsEvent, useSubscribeUnit } from '@/lib/websocket';
 
 export default function UnitDetailPage() {
   const { id } = useParams<{ id: string }>();
+  const router = useRouter();
   const queryClient = useQueryClient();
   const { hasPermission } = useAuthStore();
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
@@ -120,6 +121,31 @@ export default function UnitDetailPage() {
     onError: (err: any) => toast(err.message, 'error'),
   });
 
+  // Backend already blocks this (ConflictException) if any task is
+  // in progress or pending verification - real work in flight always
+  // wins over "created by mistake." Soft delete (deletedAt), not a
+  // hard delete - recoverable if this turns out to be the wrong call.
+  const deleteUnitMutation = useMutation({
+    mutationFn: () => api.units.delete(id),
+    onSuccess: () => {
+      toast('Unit deleted', 'success');
+      router.push('/production-calendar');
+    },
+    onError: (err: any) => toast(err.message, 'error'),
+  });
+
+  // Backend blocks this the same way (ConflictException) if the part
+  // has any completed or in-progress task - a part that's actually
+  // been worked on is never a "delete by mistake" case anymore.
+  const deletePartMutation = useMutation({
+    mutationFn: (partId: string) => api.parts.delete(partId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['unit', id] });
+      toast('Part deleted', 'success');
+    },
+    onError: (err: any) => toast(err.message, 'error'),
+  });
+
   // New generic workflow engine (Step 2) - standalone from the existing
   // Engineering/Planner/Manager/Assembly flow above. Exists here so it
   // can actually be exercised end to end, not just CRUD'd in
@@ -203,11 +229,27 @@ export default function UnitDetailPage() {
           { label: unit.serialNumber },
         ]}
         action={
-          hasPermission('part:manage') && (
-            <Button leftIcon={<Plus className="w-3.5 h-3.5" />} onClick={() => setAddPartOpen(true)}>
-              Add Part
-            </Button>
-          )
+          <div className="flex items-center gap-2">
+            {hasPermission('part:manage') && (
+              <Button leftIcon={<Plus className="w-3.5 h-3.5" />} onClick={() => setAddPartOpen(true)}>
+                Add Part
+              </Button>
+            )}
+            {hasPermission('unit:manage') && (
+              <Button
+                variant="destructive"
+                leftIcon={<Trash2 className="w-3.5 h-3.5" />}
+                loading={deleteUnitMutation.isPending}
+                onClick={() => {
+                  if (confirm(`Delete unit ${unit.serialNumber}? This can't be undone from here - only do this if it was created by mistake.`)) {
+                    deleteUnitMutation.mutate();
+                  }
+                }}
+              >
+                Delete Unit
+              </Button>
+            )}
+          </div>
         }
       />
 
@@ -470,7 +512,14 @@ export default function UnitDetailPage() {
           ) : (
             <div className="space-y-2">
               {unit.parts.map((part: any) => (
-                <PartRow key={part.id} part={part} onTaskClick={setSelectedTaskId} />
+                <PartRow
+                  key={part.id}
+                  part={part}
+                  onTaskClick={setSelectedTaskId}
+                  onDelete={(partId) => deletePartMutation.mutate(partId)}
+                  canDelete={hasPermission('part:manage')}
+                  deleting={deletePartMutation.isPending && deletePartMutation.variables === part.id}
+                />
               ))}
             </div>
           )}
@@ -539,7 +588,7 @@ export default function UnitDetailPage() {
   );
 }
 
-function PartRow({ part, onTaskClick }: { part: any; onTaskClick: (id: string) => void }) {
+function PartRow({ part, onTaskClick, onDelete, canDelete, deleting }: { part: any; onTaskClick: (id: string) => void; onDelete: (partId: string) => void; canDelete: boolean; deleting: boolean }) {
   const [expanded, setExpanded] = useState(false);
   const progress = Number(part.progressPercentage);
 
@@ -560,6 +609,22 @@ function PartRow({ part, onTaskClick }: { part: any; onTaskClick: (id: string) =
         <span className={cn('inline-flex items-center rounded-md px-2 py-0.5 text-xs font-medium flex-shrink-0', PART_STATUS_BG[part.status as PartStatus] ?? 'bg-muted text-muted-foreground')}>
           {part.status}
         </span>
+        {canDelete && (
+          <button
+            type="button"
+            title="Delete this part"
+            disabled={deleting}
+            onClick={(e) => {
+              e.stopPropagation();
+              if (confirm(`Delete part ${part.partType?.name} (${part.identifier})? Only do this if it was added by mistake.`)) {
+                onDelete(part.id);
+              }
+            }}
+            className="flex-shrink-0 p-1.5 rounded-md text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
+          >
+            <Trash2 className="w-3.5 h-3.5" />
+          </button>
+        )}
       </button>
 
       {expanded && part.tasks && (

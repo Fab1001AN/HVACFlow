@@ -341,6 +341,7 @@ export const api = {
       api.get<any>(`/orders/${orderId}/units`, { params }),
     get: (id: string) => api.get<any>(`/units/${id}`),
     createDirect: (body: any) => api.post<any>('/units', body),
+    delete: (id: string) => api.delete(`/units/${id}`),
     create: (orderId: string, body: any) =>
       api.post<any>(`/orders/${orderId}/units`, body),
     update: (id: string, body: any) => api.patch<any>(`/units/${id}`, body),
@@ -362,6 +363,7 @@ export const api = {
       api.post<any>(`/units/${unitId}/parts`, body),
     update: (id: string, body: any) => api.patch<any>(`/parts/${id}`, body),
     replaceRoute: (id: string, processDefinitionIds: string[], reason: string) => api.patch<any>(`/parts/${id}/route`, { processDefinitionIds, reason }),
+    delete: (id: string) => api.delete(`/parts/${id}`),
   },
 
   reworks: {
