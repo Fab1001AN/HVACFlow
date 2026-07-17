@@ -117,6 +117,9 @@ model User {
   unitComments            UnitComment[]
   vendorParts             VendorPart[]
   activityLogs            ActivityLog[]
+  reworkAssigned          UnitRework[] @relation("ReworkAssignedTo")
+  reworkCreated           UnitRework[] @relation("ReworkCreatedBy")
+  shipmentsCreated        ShipmentRecord[]
 
   @@map("users")
 }
@@ -362,6 +365,8 @@ model Unit {
   comments          UnitComment[]
   vendorParts       VendorPart[]
   activityLogs      ActivityLog[]
+  reworks           UnitRework[]
+  shipments         ShipmentRecord[]
   currentWorkflowStage WorkflowStage? @relation("UnitWorkflowStage", fields: [currentWorkflowStageId], references: [id], onDelete: SetNull)
 
   @@index([orderId])
@@ -398,6 +403,9 @@ enum ActivityAction {
   WorkflowStageAdvanced
   WorkflowStageMovedBack
   WorkflowStageSet
+  ReworkCreated
+  ReworkCompleted
+  ShipmentLogged
 }
 
 model ActivityLog {
@@ -437,6 +445,66 @@ model UnitComment {
 // dates. Added either by a Purchasing user (drag-drop from the vendor
 // part-type palette) or by Assembly directly if the Purchasing
 // department is toggled off.
+enum ReworkStatus {
+  Open
+  Completed
+}
+
+// Deliberately separate from WorkflowStage/currentWorkflowStageId - a
+// completed unit is never reopened (per this project's own rule), so
+// post-shipment rework can't be "move the unit backward." Instead it's
+// its own simple record linked to the original unit: what's wrong, who's
+// fixing it, done or not, when it went back out. No internal stages of
+// its own - the person handling it might be pulled from any department,
+// there's no fixed sequence to enforce here the way there is for normal
+// production.
+model UnitRework {
+  id                String       @id @default(uuid())
+  unitId            String
+  issue             String
+  assignedToUserId  String?
+  status            ReworkStatus @default(Open)
+  notes             String?
+  completedAt       DateTime?
+  reshippedAt       DateTime?
+  createdByUserId   String
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+
+  unit        Unit  @relation(fields: [unitId], references: [id], onDelete: Cascade)
+  assignedTo  User? @relation("ReworkAssignedTo", fields: [assignedToUserId], references: [id])
+  createdBy   User  @relation("ReworkCreatedBy", fields: [createdByUserId], references: [id])
+
+  @@index([unitId])
+  @@map("unit_reworks")
+}
+
+// One-to-many rather than one-to-one - a unit that goes through Rework
+// after its first shipment gets a second ShipmentRecord for the
+// reship, not an edited version of the first. Keeps a real history of
+// every time this unit actually left the building.
+model ShipmentRecord {
+  id                   String    @id @default(uuid())
+  unitId               String
+  carrierName          String?
+  shipDate             DateTime?
+  truckNumber          String?
+  trackingNumber       String? // BOL / freight reference number
+  driverName           String?
+  destinationConfirmed Boolean   @default(false)
+  receivedBySignature  String?
+  notes                String?
+  createdByUserId      String
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  unit      Unit @relation(fields: [unitId], references: [id], onDelete: Cascade)
+  createdBy User @relation(fields: [createdByUserId], references: [id])
+
+  @@index([unitId])
+  @@map("shipment_records")
+}
+
 model VendorPart {
   id                  String    @id @default(uuid())
   unitId              String

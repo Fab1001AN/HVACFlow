@@ -335,6 +335,7 @@ export const api = {
     startAssembly: (id: string, teamName: string) => api.post<any>(`/units/${id}/start-assembly`, { teamName }),
     workflowAdvance: (id: string) => api.post<any>(`/units/${id}/workflow/advance`, {}),
     workflowMoveBack: (id: string, reason?: string) => api.post<any>(`/units/${id}/workflow/move-back`, { reason }),
+    workflowSendBack: (id: string, targetStageId: string, reason: string) => api.post<any>(`/units/${id}/workflow/send-back`, { targetStageId, reason }),
     workflowSetStage: (id: string, stageId: string) => api.post<any>(`/units/${id}/workflow/set-stage`, { stageId }),
     listByOrder: (orderId: string, params?: any) =>
       api.get<any>(`/orders/${orderId}/units`, { params }),
@@ -361,6 +362,18 @@ export const api = {
       api.post<any>(`/units/${unitId}/parts`, body),
     update: (id: string, body: any) => api.patch<any>(`/parts/${id}`, body),
     replaceRoute: (id: string, processDefinitionIds: string[], reason: string) => api.patch<any>(`/parts/${id}/route`, { processDefinitionIds, reason }),
+  },
+
+  reworks: {
+    listByUnit: (unitId: string) => api.get<any[]>(`/units/${unitId}/reworks`),
+    create: (unitId: string, body: any) => api.post<any>(`/units/${unitId}/reworks`, body),
+    update: (id: string, body: any) => api.patch<any>(`/reworks/${id}`, body),
+  },
+
+  shipments: {
+    listByUnit: (unitId: string) => api.get<any[]>(`/units/${unitId}/shipments`),
+    create: (unitId: string, body: any) => api.post<any>(`/units/${unitId}/shipments`, body),
+    update: (id: string, body: any) => api.patch<any>(`/shipments/${id}`, body),
   },
 
   vendorParts: {

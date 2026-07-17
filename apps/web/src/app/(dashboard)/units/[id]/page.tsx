@@ -6,7 +6,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { useAuthStore } from '@/store/auth.store';
 import { PageHeader, Button, EmptyState, Spinner, Modal, Input, Select, Card, ProgressBar, Textarea, Badge } from '@/components/shared';
-import { Plus, Package, ChevronRight, CheckCircle, Circle, Clock, AlertCircle, ExternalLink, MessageSquare, AlertTriangle, History, Workflow } from 'lucide-react';
+import { Plus, Package, ChevronRight, CheckCircle, Circle, Clock, AlertCircle, ExternalLink, MessageSquare, AlertTriangle, History, Workflow, Wrench, Truck } from 'lucide-react';
 import Link from 'next/link';
 import { toast } from '@/components/shared';
 import { cn, PART_STATUS_BG, STATUS_BG, STATUS_LABELS } from '@/lib/utils';
@@ -36,6 +36,61 @@ export default function UnitDetailPage() {
   const { data: activity = [] } = useQuery({
     queryKey: ['unit', id, 'activity'],
     queryFn: () => api.units.activity(id),
+  });
+
+  const { data: reworks = [] } = useQuery({
+    queryKey: ['unit', id, 'reworks'],
+    queryFn: () => api.reworks.listByUnit(id),
+  });
+  const { data: shipments = [] } = useQuery({
+    queryKey: ['unit', id, 'shipments'],
+    queryFn: () => api.shipments.listByUnit(id),
+  });
+  const { data: allUsers = [] } = useQuery({
+    queryKey: ['users'],
+    queryFn: () => api.users.list(),
+    enabled: hasPermission('rework:manage'),
+    staleTime: 60_000,
+  });
+
+  const [reworkIssue, setReworkIssue] = useState('');
+  const [reworkAssignee, setReworkAssignee] = useState('');
+  const createReworkMutation = useMutation({
+    mutationFn: () => api.reworks.create(id, { issue: reworkIssue, assignedToUserId: reworkAssignee || undefined }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['unit', id] });
+      setReworkIssue('');
+      setReworkAssignee('');
+      toast('Rework opened', 'success');
+    },
+    onError: (err: any) => toast(err.message, 'error'),
+  });
+  const updateReworkMutation = useMutation({
+    mutationFn: ({ reworkId, body }: { reworkId: string; body: any }) => api.reworks.update(reworkId, body),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['unit', id] });
+      toast('Rework updated', 'success');
+    },
+    onError: (err: any) => toast(err.message, 'error'),
+  });
+
+  const [shipForm, setShipForm] = useState({ carrierName: '', shipDate: '', truckNumber: '', trackingNumber: '', driverName: '', notes: '' });
+  const createShipmentMutation = useMutation({
+    mutationFn: () => api.shipments.create(id, { ...shipForm, shipDate: shipForm.shipDate || undefined }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['unit', id] });
+      setShipForm({ carrierName: '', shipDate: '', truckNumber: '', trackingNumber: '', driverName: '', notes: '' });
+      toast('Shipment logged', 'success');
+    },
+    onError: (err: any) => toast(err.message, 'error'),
+  });
+  const updateShipmentMutation = useMutation({
+    mutationFn: ({ shipmentId, body }: { shipmentId: string; body: any }) => api.shipments.update(shipmentId, body),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['unit', id] });
+      toast('Shipment updated', 'success');
+    },
+    onError: (err: any) => toast(err.message, 'error'),
   });
 
   const { data: partTypes } = useQuery({
@@ -72,7 +127,6 @@ export default function UnitDetailPage() {
   const { data: workflowStages = [] } = useQuery({
     queryKey: ['workflow-stages'],
     queryFn: () => api.workflowStages.list(),
-    enabled: hasPermission('config:manage'),
   });
   const workflowAdvanceMutation = useMutation({
     mutationFn: () => api.units.workflowAdvance(id),
@@ -87,6 +141,18 @@ export default function UnitDetailPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['unit', id] });
       toast('Sent back to the previous stage', 'success');
+    },
+    onError: (err: any) => toast(err.message, 'error'),
+  });
+  const [sendBackStageId, setSendBackStageId] = useState('');
+  const [sendBackReason, setSendBackReason] = useState('');
+  const workflowSendBackMutation = useMutation({
+    mutationFn: () => api.units.workflowSendBack(id, sendBackStageId, sendBackReason),
+    onSuccess: (updated: any) => {
+      queryClient.invalidateQueries({ queryKey: ['unit', id] });
+      setSendBackStageId('');
+      setSendBackReason('');
+      toast(`Sent back to ${updated.currentWorkflowStage?.name}`, 'success');
     },
     onError: (err: any) => toast(err.message, 'error'),
   });
@@ -230,6 +296,36 @@ export default function UnitDetailPage() {
                 Move Back
               </Button>
             </div>
+
+            {/* QC-style: send to any earlier stage with a required
+                reason, not just one step back. */}
+            <div className="pt-3 border-t border-border mb-3">
+              <p className="text-xs text-muted-foreground mb-2">Send back to a specific department (e.g. QC sending it back to Fabrication)</p>
+              <div className="space-y-2">
+                <Select
+                  value={sendBackStageId}
+                  onChange={(e) => setSendBackStageId(e.target.value)}
+                  options={(workflowStages as any[])
+                    .filter((s: any) => s.id !== unit.currentWorkflowStageId)
+                    .map((s: any) => ({ value: s.id, label: s.name }))}
+                  placeholder="Select a department to send back to"
+                />
+                <Textarea
+                  placeholder="Reason (required) - what needs fixing"
+                  value={sendBackReason}
+                  onChange={(e) => setSendBackReason(e.target.value)}
+                  rows={2}
+                />
+                <Button
+                  size="sm" variant="secondary" className="w-full"
+                  disabled={!sendBackStageId || !sendBackReason.trim()}
+                  loading={workflowSendBackMutation.isPending}
+                  onClick={() => workflowSendBackMutation.mutate()}
+                >
+                  Send Back
+                </Button>
+              </div>
+            </div>
             {hasPermission('config:manage') && (
               <div className="pt-3 border-t border-border">
                 <p className="text-xs text-muted-foreground mb-2">Admin override - jump directly to any stage</p>
@@ -248,6 +344,96 @@ export default function UnitDetailPage() {
               </div>
             )}
           </Card>
+
+          {(hasPermission('rework:manage') || reworks.length > 0) && (
+            <Card className="p-4">
+              <div className="flex items-center gap-2 mb-1"><Wrench className="w-4 h-4" /><h2 className="text-sm font-semibold">Rework</h2></div>
+              <p className="text-xs text-muted-foreground mb-4">Separate from the pipeline above - the unit's own completion is never reopened. This is a linked record for post-completion fixes.</p>
+
+              {hasPermission('rework:manage') && (
+                <div className="space-y-2 mb-4">
+                  <Textarea placeholder="What's wrong / customer complaint" value={reworkIssue} onChange={(e) => setReworkIssue(e.target.value)} rows={2} />
+                  <div className="flex gap-2">
+                    <Select
+                      value={reworkAssignee}
+                      onChange={(e) => setReworkAssignee(e.target.value)}
+                      options={(allUsers as any[]).map((u: any) => ({ value: u.id, label: u.name }))}
+                      placeholder="Assign to (optional)"
+                      className="flex-1"
+                    />
+                    <Button size="sm" disabled={!reworkIssue.trim()} loading={createReworkMutation.isPending} onClick={() => createReworkMutation.mutate()}>
+                      Open Rework
+                    </Button>
+                  </div>
+                </div>
+              )}
+
+              {reworks.length === 0 ? (
+                <p className="text-xs text-muted-foreground">No rework records.</p>
+              ) : (
+                <div className="space-y-2">
+                  {(reworks as any[]).map((r: any) => (
+                    <div key={r.id} className={cn('rounded-md border p-3', r.status === 'Open' ? 'border-amber-500/40 bg-amber-500/5' : 'border-border')}>
+                      <div className="flex items-center justify-between gap-2 mb-1">
+                        <Badge variant={r.status === 'Open' ? 'default' : 'muted'}>{r.status}</Badge>
+                        <span className="text-xs text-muted-foreground">{new Date(r.createdAt).toLocaleDateString()}</span>
+                      </div>
+                      <p className="text-sm">{r.issue}</p>
+                      {r.assignedTo && <p className="text-xs text-muted-foreground mt-1">Assigned to {r.assignedTo.name}</p>}
+                      {r.status === 'Open' && hasPermission('rework:manage') && (
+                        <Button size="sm" variant="secondary" className="mt-2" loading={updateReworkMutation.isPending} onClick={() => updateReworkMutation.mutate({ reworkId: r.id, body: { status: 'Completed' } })}>
+                          Mark Rework Completed
+                        </Button>
+                      )}
+                      {r.completedAt && <p className="text-xs text-muted-foreground mt-1">Completed {new Date(r.completedAt).toLocaleDateString()}</p>}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </Card>
+          )}
+
+          {(hasPermission('shipment:manage') || shipments.length > 0) && (
+            <Card className="p-4">
+              <div className="flex items-center gap-2 mb-4"><Truck className="w-4 h-4" /><h2 className="text-sm font-semibold">Shipping</h2></div>
+              {hasPermission('shipment:manage') && (
+                <>
+                  <div className="grid grid-cols-2 gap-2 mb-3">
+                    <Input label="Carrier" value={shipForm.carrierName} onChange={(e) => setShipForm((f) => ({ ...f, carrierName: e.target.value }))} placeholder="e.g. XPO Logistics" />
+                    <Input label="Ship date" type="date" value={shipForm.shipDate} onChange={(e) => setShipForm((f) => ({ ...f, shipDate: e.target.value }))} />
+                    <Input label="Truck #" value={shipForm.truckNumber} onChange={(e) => setShipForm((f) => ({ ...f, truckNumber: e.target.value }))} />
+                    <Input label="Tracking / BOL #" value={shipForm.trackingNumber} onChange={(e) => setShipForm((f) => ({ ...f, trackingNumber: e.target.value }))} />
+                    <Input label="Driver" value={shipForm.driverName} onChange={(e) => setShipForm((f) => ({ ...f, driverName: e.target.value }))} className="col-span-2" />
+                  </div>
+                  <Textarea placeholder="Notes" value={shipForm.notes} onChange={(e) => setShipForm((f) => ({ ...f, notes: e.target.value }))} rows={2} />
+                  <Button size="sm" className="mt-2 w-full" loading={createShipmentMutation.isPending} onClick={() => createShipmentMutation.mutate()}>
+                    Log Shipment
+                  </Button>
+                </>
+              )}
+
+              {shipments.length > 0 && (
+                <div className="mt-4 space-y-2">
+                  {(shipments as any[]).map((s: any) => (
+                    <div key={s.id} className="rounded-md border border-border p-3 text-sm space-y-1">
+                      <div className="flex items-center justify-between">
+                        <span className="font-medium">{s.carrierName ?? 'Carrier not set'}</span>
+                        <span className="text-xs text-muted-foreground">{s.shipDate ? new Date(s.shipDate).toLocaleDateString() : 'No date'}</span>
+                      </div>
+                      {s.truckNumber && <p className="text-xs text-muted-foreground">Truck {s.truckNumber}</p>}
+                      {s.trackingNumber && <p className="text-xs text-muted-foreground">Tracking/BOL {s.trackingNumber}</p>}
+                      {s.driverName && <p className="text-xs text-muted-foreground">Driver: {s.driverName}</p>}
+                      {!s.destinationConfirmed && hasPermission('shipment:manage') && (
+                        <Button size="sm" variant="secondary" onClick={() => updateShipmentMutation.mutate({ shipmentId: s.id, body: { destinationConfirmed: true } })}>
+                          Confirm destination
+                        </Button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </Card>
+          )}
 
           <Card className="p-4">
             <div className="flex items-center gap-2 mb-4"><History className="w-4 h-4" /><h2 className="text-sm font-semibold">Activity timeline</h2></div>

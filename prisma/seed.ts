@@ -42,6 +42,8 @@ async function main() {
     { code: 'unit:manage', category: 'Units', description: 'Create and edit units' },
     { code: 'unit:plan', category: 'Units', description: 'Assign parts to a unit and release it to the Production Manager' },
     { code: 'vendor-part:manage', category: 'Units', description: 'Track vendor-supplied parts on a unit (received status, arrival dates)' },
+    { code: 'rework:manage', category: 'Units', description: 'Create and update rework records for completed units' },
+    { code: 'shipment:manage', category: 'Units', description: 'Log shipment/carrier details for a unit' },
     { code: 'part:view', category: 'Parts', description: 'View parts' },
     { code: 'part:manage', category: 'Parts', description: 'Create and edit parts' },
     // Configuration
@@ -148,6 +150,7 @@ async function main() {
     'task:hold', 'task:reject', 'task:reassign',
     'customer:view', 'project:view', 'order:view', 'order:manage',
     'unit:view', 'unit:manage', 'part:view', 'part:manage', 'vendor-part:manage',
+    'rework:manage', 'shipment:manage',
     'user:view', 'role:view', 'report:view', 'dashboard:configure',
     'department:view', 'process:view', 'machine:view',
   ];
