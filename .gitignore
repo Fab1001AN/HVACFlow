@@ -45,3 +45,5 @@ coverage/
 # Type checking artifacts
 *.tsbuildinfo
 next-env.d.ts
+
+*.patch
