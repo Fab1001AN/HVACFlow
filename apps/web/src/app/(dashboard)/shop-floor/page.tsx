@@ -44,7 +44,16 @@ function ShopFloorBoard() {
 
   useEffect(() => {
     const fromUrl = searchParams.get('departmentId');
-    if (fromUrl) setFilters((f) => (f.departmentId === fromUrl ? f : { ...f, departmentId: fromUrl }));
+    // Resets priorityLevelId/mine too, not just departmentId - Next.js
+    // reuses this same page instance for a same-route, different-
+    // search-param navigation (clicking a different department in the
+    // admin sidebar doesn't remount the component), so any priority
+    // filter or "My Tasks" toggle left on from a previous visit would
+    // otherwise silently carry over and could filter the new
+    // department's results down to nothing - a correctly-running query
+    // that just never matches anything, which looks exactly like "this
+    // department has no data" without actually being that.
+    if (fromUrl) setFilters((f) => (f.departmentId === fromUrl ? f : { departmentId: fromUrl, priorityLevelId: '', mine: false }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams.get('departmentId')]);
 
