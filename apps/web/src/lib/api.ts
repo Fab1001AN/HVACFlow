@@ -182,6 +182,11 @@ export const api = {
     request<T>('DELETE', path, undefined, options),
 
   // ─── Auth ────────────────────────────────────────────────────────────────
+  organizationSettings: {
+    get: () => api.get<{ id: string; name: string }>('/organization-settings'),
+    update: (name: string) => api.patch<{ id: string; name: string }>('/organization-settings', { name }),
+  },
+
   auth: {
     login: (email: string, password: string) =>
       api.post<{ tokens: { accessToken: string; refreshToken: string }; user: any }>('/auth/login', { email, password }),

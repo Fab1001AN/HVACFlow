@@ -2,8 +2,9 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { useQuery } from '@tanstack/react-query';
 import { useAuthStore } from '@/store/auth.store';
-import { ApiError } from '@/lib/api';
+import { ApiError, api } from '@/lib/api';
 
 export default function LoginPage() {
   const router = useRouter();
@@ -12,6 +13,13 @@ export default function LoginPage() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+
+  const { data: orgSettings } = useQuery({
+    queryKey: ['organization-settings'],
+    queryFn: () => api.organizationSettings.get(),
+    staleTime: Infinity,
+  });
+  const orgName = orgSettings?.name ?? 'HVACFlow';
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -39,7 +47,7 @@ export default function LoginPage() {
                 <polyline points="9 22 9 12 15 12 15 22" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
               </svg>
             </div>
-            <span className="text-xl font-semibold text-foreground">HVACFlow</span>
+            <span className="text-xl font-semibold text-foreground">{orgName}</span>
           </div>
           <p className="text-sm text-muted-foreground">Sign in to your workspace</p>
         </div>

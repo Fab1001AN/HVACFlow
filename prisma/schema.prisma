@@ -79,6 +79,19 @@ enum RouteTargetType {
 
 // ─── Identity & Access ────────────────────────────────────────────────────────
 
+// Singleton row (always id = "default") holding the customer-editable
+// branding for this deployment. Since each customer gets their own
+// separate deployment (own database) rather than shared multi-tenant
+// infrastructure, one row per install is all this needs - no
+// organizationId scoping required anywhere else.
+model OrganizationSettings {
+  id        String   @id @default("default")
+  name      String   @default("HVACFlow")
+  updatedAt DateTime @updatedAt
+
+  @@map("organization_settings")
+}
+
 model User {
   id           String    @id @default(uuid())
   email        String    @unique

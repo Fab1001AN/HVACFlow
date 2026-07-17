@@ -25,6 +25,7 @@ const NAV_ITEMS = [
 ];
 
 const CONFIG_ITEMS = [
+  { href: '/config/general', label: 'General', icon: Sliders },
   { href: '/config/departments', label: 'Departments', icon: Building2 },
   { href: '/config/priority-levels', label: 'Priority Levels', icon: Tag },
   { href: '/config/processes', label: 'Processes', icon: Cpu },
@@ -125,6 +126,23 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     staleTime: 60_000,
   });
 
+  const { data: orgSettings } = useQuery({
+    queryKey: ['organization-settings'],
+    queryFn: () => api.organizationSettings.get(),
+    staleTime: Infinity,
+  });
+  const orgName = orgSettings?.name ?? 'HVACFlow';
+
+  // The static <title> in the root layout is a build-time default, not
+  // something that can read this deployment's chosen name without a
+  // server-side fetch - simplest, lowest-risk fix is updating the tab
+  // title client-side once the name is actually known. Same pattern as
+  // most SPA-style apps use for anything the server can't know ahead of
+  // time.
+  useEffect(() => {
+    if (orgSettings?.name) document.title = orgSettings.name;
+  }, [orgSettings?.name]);
+
   if (!isAuthenticated || !user) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
@@ -151,7 +169,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             <Box className="w-4 h-4 text-primary-foreground" />
           </div>
           {sidebarOpen && (
-            <span className="font-semibold text-sm text-foreground">HVACFlow</span>
+            <span className="font-semibold text-sm text-foreground">{orgName}</span>
           )}
           <button
             onClick={() => setSidebarOpen(!sidebarOpen)}
@@ -276,7 +294,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         <div className="w-7 h-7 rounded-md bg-primary flex items-center justify-center">
           <Box className="w-4 h-4 text-primary-foreground" />
         </div>
-        <span className="font-semibold text-sm text-foreground">HVACFlow</span>
+        <span className="font-semibold text-sm text-foreground">{orgName}</span>
         <button
           onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
           className="ml-auto text-muted-foreground hover:text-foreground"
