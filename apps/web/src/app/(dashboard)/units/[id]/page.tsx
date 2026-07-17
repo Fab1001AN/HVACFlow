@@ -288,6 +288,10 @@ export default function UnitDetailPage() {
                 {unit.currentWorkflowStage?.name ?? 'Not on this engine yet'}
               </Badge>
             </div>
+            <p className="text-[11px] text-muted-foreground mb-4">
+              Real pipeline currently says: engineering={unit.engineeringStatus}, production={unit.productionReleaseStatus}
+              {unit.assemblyStartedAt ? ', assembly started' : ''} — compare against the shadow stage above to verify they agree.
+            </p>
             <div className="flex gap-2 mb-4">
               <Button size="sm" className="flex-1" loading={workflowAdvanceMutation.isPending} onClick={() => workflowAdvanceMutation.mutate()}>
                 Advance

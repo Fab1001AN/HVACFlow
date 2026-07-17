@@ -73,6 +73,22 @@ export class UnitsService {
     return value ? new Date(`${value}-01T00:00:00.000Z`) : undefined;
   }
 
+  // Step 3a (shadow mode): stamps the new generic engine's position
+  // field in parallel with the real, existing pipeline field changes
+  // below - purely additive, nothing reads from currentWorkflowStageId
+  // as the source of truth yet. Wrapped in try/catch and never awaited
+  // in a way that could fail the real operation - if the named stage
+  // doesn't exist yet (e.g. db:seed hasn't run against this database),
+  // this silently no-ops rather than breaking unit creation/release/etc.
+  private async shadowSetStage(unitId: string, stageName: string) {
+    try {
+      const stage = await this.prisma.workflowStage.findUnique({ where: { name: stageName } });
+      if (stage) await this.prisma.unit.update({ where: { id: unitId }, data: { currentWorkflowStageId: stage.id } });
+    } catch {
+      // Deliberately swallowed - see comment above.
+    }
+  }
+
   async findAll(page = 1, pageSize = 100, status?: UnitStatus, departmentId?: string) {
     const where: Prisma.UnitWhereInput = { deletedAt: null, ...(status ? { status } : {}), ...(departmentId ? { currentDepartmentId: departmentId } : {}) };
     const [data, total] = await Promise.all([
@@ -289,6 +305,7 @@ export class UnitsService {
       action: ActivityAction.UnitCreated,
       description: `Unit ${unit.serialNumber} created`,
     });
+    await this.shadowSetStage(unit.id, 'Detailing');
     return this.findOne(unit.id);
   }
 
@@ -318,6 +335,7 @@ export class UnitsService {
       action: ActivityAction.EngineeringAdvanced,
       description: `Engineering stage advanced to ${next}`,
     });
+    if (next === EngineeringStatus.ReleasedToManufacturing) await this.shadowSetStage(id, 'Planning');
     return updated;
   }
 
@@ -391,6 +409,7 @@ export class UnitsService {
       action: ActivityAction.UnitPlanned,
       description: `Parts assigned (${unit.parts.length}) and released to the Production Manager`,
     });
+    await this.shadowSetStage(id, 'Manager Release');
     return updated;
   }
 
@@ -420,6 +439,14 @@ export class UnitsService {
       action: ActivityAction.UnitReleasedToProduction,
       description: `Released to Production - now waiting for ${fabrication.name}`,
     });
+    // Shadow-set to Fabrication Started here too, not just in
+    // startManufacturing() below - there's no separate "released but
+    // not yet started" stage in this first 5-stage shadow set, so
+    // "released to Fabrication" and "Fabrication actually started" are
+    // deliberately collapsed into the same shadow stage for now. Fine
+    // since nothing reads this yet; worth a real 6th stage if/when this
+    // becomes the actual source of truth.
+    await this.shadowSetStage(id, 'Fabrication Started');
     return updated;
   }
 
@@ -438,6 +465,7 @@ export class UnitsService {
       action: ActivityAction.ManufacturingStarted,
       description: 'Manufacturing started - first routed steps are ready',
     });
+    await this.shadowSetStage(id, 'Fabrication Started');
     return this.findOne(id);
   }
 
@@ -460,6 +488,7 @@ export class UnitsService {
       action: ActivityAction.AssemblyStarted,
       description: `Assembly build started - team ${teamName}`,
     });
+    await this.shadowSetStage(id, 'Assembly Started');
     return this.findOne(id);
   }
 

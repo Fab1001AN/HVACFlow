@@ -671,6 +671,33 @@ async function main() {
     },
   });
 
+  // ─── Workflow Stages (Step 3a: shadow mode) ────────────────────────────────
+  // These 5 stages mirror the 5 EXISTING pipeline functions
+  // (advanceEngineering/markPlanned/releaseToProduction/
+  // startManufacturing/startAssembly) - each of those now ALSO stamps
+  // currentWorkflowStageId to the matching stage here, purely as a
+  // parallel record, alongside its real existing behavior which is
+  // completely unchanged. Nothing user-facing reads from these yet.
+  // Deliberately NOT seeding QC/Unit-Completed/Shipping stages here -
+  // those are genuinely new concepts with no existing function to
+  // mirror, so they can't be shadow-written the same way; they'll be
+  // added properly once the real cutover happens.
+  console.log('Seeding workflow stages (shadow mode)...');
+  const workflowStageData = [
+    { name: 'Detailing', sortOrder: 1, departmentId: departments['ENG'], requiredPermission: 'unit:manage', actionLabel: 'Advance Detailing' },
+    { name: 'Planning', sortOrder: 2, departmentId: null, requiredPermission: 'unit:plan', actionLabel: 'Release to Production Manager' },
+    { name: 'Manager Release', sortOrder: 3, departmentId: null, requiredPermission: 'unit:manage', actionLabel: 'Release to Fabrication' },
+    { name: 'Fabrication Started', sortOrder: 4, departmentId: departments['FAB'], requiredPermission: 'task:start', actionLabel: 'Start Entire Unit' },
+    { name: 'Assembly Started', sortOrder: 5, departmentId: departments['ASSY'], requiredPermission: 'task:start', actionLabel: 'Start Building Unit' },
+  ];
+  for (const stage of workflowStageData) {
+    await prisma.workflowStage.upsert({
+      where: { name: stage.name },
+      update: { sortOrder: stage.sortOrder, departmentId: stage.departmentId, requiredPermission: stage.requiredPermission, actionLabel: stage.actionLabel },
+      create: stage,
+    });
+  }
+
   console.log('\n✅ Seed complete!');
   console.log('   Admin login: admin@hvacflow.com / Admin@HVACFlow1');
   console.log('   Change the admin password immediately in production.\n');
