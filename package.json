@@ -17,6 +17,7 @@
     "db:migrate": "prisma migrate dev --schema=./prisma/schema.prisma",
     "db:migrate:deploy": "prisma migrate deploy --schema=./prisma/schema.prisma",
     "db:seed": "ts-node --project tsconfig.seed.json prisma/seed.ts",
+    "db:clear-units": "ts-node --project tsconfig.seed.json prisma/clear-units.ts",
     "db:studio": "prisma studio --schema=./prisma/schema.prisma",
     "db:reset": "prisma migrate reset --schema=./prisma/schema.prisma",
     "build:shared": "npm --workspace @hvacflow/shared-types run build",
