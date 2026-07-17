@@ -44,6 +44,11 @@ class MoveBackDto {
   @IsOptional() @IsString() @MaxLength(500) reason?: string;
 }
 
+class SendBackDto {
+  @IsUUID() targetStageId: string;
+  @IsString() @MaxLength(500) reason: string;
+}
+
 class SetStageDto {
   @IsUUID() stageId: string;
 }
@@ -205,6 +210,45 @@ export class WorkflowStagesService {
   // per-stage permission) and always logged distinctly from a normal
   // advance/move-back, since this is a manual correction, not a real
   // workflow transition.
+  // The QC scenario needs more than moveBack()'s strict single-step:
+  // "send it back to Fabrication" from a QC stage near the end of the
+  // pipeline needs to reach an arbitrary earlier stage, not just the
+  // immediately preceding one. Reason is required - this is exactly the
+  // kind of action that needs a paper trail (who sent it back, and why),
+  // logged distinctly from a normal advance so it's visibly different on
+  // the timeline, not just another step.
+  async sendBack(unitId: string, dto: SendBackDto, user: JwtPayload) {
+    const unit = await this.prisma.unit.findUnique({ where: { id: unitId, deletedAt: null } });
+    if (!unit) throw new NotFoundException('Unit not found');
+    if (!unit.currentWorkflowStageId) throw new ConflictException('This unit is not on any stage yet');
+
+    const allStages = await this.allStagesOrdered();
+    const currentIndex = allStages.findIndex((s) => s.id === unit.currentWorkflowStageId);
+    if (currentIndex < 0) throw new ConflictException('This unit\'s current stage no longer exists - use the admin override to set a valid stage');
+
+    const currentStage = allStages[currentIndex];
+    this.assertPermission(user, currentStage.requiredPermission);
+
+    const targetStage = allStages.find((s) => s.id === dto.targetStageId);
+    if (!targetStage) throw new NotFoundException('Target stage not found');
+    if (!targetStage.isActive) throw new ConflictException(`${targetStage.name} is not active - activate it first or choose a different stage`);
+    const targetIndex = allStages.findIndex((s) => s.id === targetStage.id);
+    if (targetIndex >= currentIndex) throw new ConflictException('Can only send back to an earlier stage, not the current or a later one');
+
+    const updated = await this.prisma.unit.update({
+      where: { id: unitId },
+      data: { currentWorkflowStageId: targetStage.id },
+      include: { currentWorkflowStage: true },
+    });
+    await this.activityLog.log({
+      unitId,
+      userId: user.sub,
+      action: ActivityAction.WorkflowStageMovedBack,
+      description: `Sent back from ${currentStage.name} to ${targetStage.name} - ${dto.reason}`,
+    });
+    return updated;
+  }
+
   async setStage(unitId: string, dto: SetStageDto, userId: string) {
     const [unit, stage] = await Promise.all([
       this.prisma.unit.findUnique({ where: { id: unitId, deletedAt: null } }),
@@ -237,13 +281,11 @@ export class WorkflowStagesController {
   constructor(private readonly service: WorkflowStagesService) {}
 
   @Get('workflow-stages')
-  @RequirePermissions('config:manage')
   findAll() {
     return this.service.findAll();
   }
 
   @Get('workflow-stages/:id')
-  @RequirePermissions('config:manage')
   findOne(@Param('id') id: string) {
     return this.service.findOne(id);
   }
@@ -286,6 +328,11 @@ export class WorkflowStagesController {
   @Post('units/:id/workflow/move-back')
   moveBack(@Param('id') id: string, @Body() dto: MoveBackDto, @CurrentUser() user: JwtPayload) {
     return this.service.moveBack(id, dto, user);
+  }
+
+  @Post('units/:id/workflow/send-back')
+  sendBack(@Param('id') id: string, @Body() dto: SendBackDto, @CurrentUser() user: JwtPayload) {
+    return this.service.sendBack(id, dto, user);
   }
 
   @Post('units/:id/workflow/set-stage')
