@@ -8,10 +8,29 @@ import { PrismaService } from '../../common/prisma/prisma.service';
 import { CreateDepartmentDto } from './dto/create-department.dto';
 import { UpdateDepartmentDto } from './dto/update-department.dto';
 import { ReorderDto } from './dto/reorder.dto';
+import { TaskStatus } from '@hvacflow/shared-types';
 
 @Injectable()
 export class DepartmentsService {
   constructor(private readonly prisma: PrismaService) {}
+
+  // Same reasoning as ProcessDefinitionsService.impact() - toggling a
+  // department off (e.g. Purchasing) while units currently depend on
+  // it changes real behavior instantly (Supervisor Dashboard's
+  // toggle-off vendor-part fallback, for one), so the frontend needs
+  // real numbers to warn with before that toggle gets flipped.
+  async impact(id: string) {
+    const activeTasks = await this.prisma.productionTask.count({
+      where: {
+        departmentId: id,
+        status: { in: [TaskStatus.Ready, TaskStatus.InProgress, TaskStatus.PendingVerification, TaskStatus.OnHold] },
+      },
+    });
+    const unitsCurrentlyHere = await this.prisma.unit.count({
+      where: { currentDepartmentId: id, deletedAt: null, status: { notIn: ['Completed', 'Dispatched'] } },
+    });
+    return { activeTaskCount: activeTasks, unitsCurrentlyHere };
+  }
 
   async findAll(isActive?: boolean) {
     return this.prisma.department.findMany({

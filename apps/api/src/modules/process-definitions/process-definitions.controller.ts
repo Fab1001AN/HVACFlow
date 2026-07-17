@@ -24,6 +24,12 @@ export class ProcessDefinitionsController {
     return this.service.findOne(id);
   }
 
+  @Get(':id/impact')
+  @RequirePermissions('config:manage')
+  impact(@Param('id') id: string) {
+    return this.service.impact(id);
+  }
+
   @Post()
   @RequirePermissions('config:manage')
   create(@Body() dto: CreateProcessDefinitionDto) {

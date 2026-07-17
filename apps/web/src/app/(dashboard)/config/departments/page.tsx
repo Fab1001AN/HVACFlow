@@ -4,7 +4,8 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { PageHeader, Button, Modal, Input, EmptyState, Spinner, Card } from '@/components/shared';
-import { Plus, GripVertical, Pencil, Trash2, Building2 } from 'lucide-react';
+import { ImpactWarningModal } from '@/components/shared/impact-warning-modal';
+import { Plus, GripVertical, Pencil, Trash2, Building2, Power } from 'lucide-react';
 import { toast } from '@/components/shared';
 import { cn } from '@/lib/utils';
 
@@ -14,6 +15,8 @@ export default function DepartmentsConfigPage() {
   const [editing, setEditing] = useState<any>(null);
   const [form, setForm] = useState({ name: '', code: '', color: '#6366f1' });
   const [dragging, setDragging] = useState<string | null>(null);
+  const [pendingToggle, setPendingToggle] = useState<{ dept: any; impact: { activeTaskCount: number; unitsCurrentlyHere: number } } | null>(null);
+  const [checkingImpactId, setCheckingImpactId] = useState<string | null>(null);
 
   const { data: departments = [], isLoading } = useQuery({
     queryKey: ['departments'],
@@ -31,6 +34,41 @@ export default function DepartmentsConfigPage() {
     },
     onError: (err: any) => toast(err.message, 'error'),
   });
+
+  const toggleActiveMutation = useMutation({
+    mutationFn: (dept: any) => api.departments.update(dept.id, { isActive: !dept.isActive }),
+    onSuccess: (_, dept) => {
+      queryClient.invalidateQueries({ queryKey: ['departments'] });
+      setPendingToggle(null);
+      toast(dept.isActive ? `${dept.name} deactivated` : `${dept.name} activated`, 'success');
+    },
+    onError: (err: any) => toast(err.message, 'error'),
+  });
+
+  // Turning a department OFF changes real behavior instantly wherever
+  // the app checks isActive (e.g. Assembly's vendor-part fallback when
+  // Purchasing is off) - check what's actually running through it right
+  // now before flipping the switch. Turning one ON is always safe, no
+  // check needed.
+  const handleToggleActive = async (dept: any) => {
+    if (!dept.isActive) {
+      toggleActiveMutation.mutate(dept);
+      return;
+    }
+    setCheckingImpactId(dept.id);
+    try {
+      const impact = await api.departments.impact(dept.id);
+      if (impact.activeTaskCount > 0 || impact.unitsCurrentlyHere > 0) {
+        setPendingToggle({ dept, impact });
+      } else {
+        toggleActiveMutation.mutate(dept);
+      }
+    } catch (err: any) {
+      toast(err.message ?? 'Could not check impact', 'error');
+    } finally {
+      setCheckingImpactId(null);
+    }
+  };
 
   const deleteMutation = useMutation({
     mutationFn: (id: string) => api.departments.delete(id),
@@ -96,6 +134,16 @@ export default function DepartmentsConfigPage() {
                     {dept.isActive ? 'Active' : 'Inactive'}
                   </span>
                   <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className={dept.isActive ? 'text-muted-foreground' : 'text-emerald-500'}
+                      loading={checkingImpactId === dept.id}
+                      title={dept.isActive ? 'Deactivate' : 'Activate'}
+                      onClick={() => handleToggleActive(dept)}
+                    >
+                      <Power className="w-3.5 h-3.5" />
+                    </Button>
                     <Button variant="ghost" size="sm" onClick={() => openEdit(dept)}><Pencil className="w-3.5 h-3.5" /></Button>
                     <Button variant="ghost" size="sm" className="text-destructive hover:text-destructive"
                       onClick={() => { if (confirm(`Delete ${dept.name}?`)) deleteMutation.mutate(dept.id); }}>
@@ -134,6 +182,18 @@ export default function DepartmentsConfigPage() {
           </div>
         </div>
       </Modal>
+
+      <ImpactWarningModal
+        open={!!pendingToggle}
+        title={`Deactivate ${pendingToggle?.dept.name}?`}
+        lines={[
+          `${pendingToggle?.impact.activeTaskCount ?? 0} active task(s) and ${pendingToggle?.impact.unitsCurrentlyHere ?? 0} unit(s) are currently in this department.`,
+          'Turning it off changes behavior immediately wherever the app checks whether this department is active - for example, Assembly\'s vendor-parts fallback only appears once Purchasing is off.',
+        ]}
+        confirming={toggleActiveMutation.isPending}
+        onConfirm={() => pendingToggle && toggleActiveMutation.mutate(pendingToggle.dept)}
+        onCancel={() => setPendingToggle(null)}
+      />
     </div>
   );
 }

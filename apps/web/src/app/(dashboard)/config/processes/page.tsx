@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { PageHeader, Button, Modal, Input, Select, EmptyState, Spinner, Card } from '@/components/shared';
+import { ImpactWarningModal } from '@/components/shared/impact-warning-modal';
 import { Plus, Pencil, Trash2, Cpu, CheckSquare, Shield } from 'lucide-react';
 import { toast } from '@/components/shared';
 import { cn } from '@/lib/utils';
@@ -21,6 +22,8 @@ export default function ProcessesConfigPage() {
   const [editing, setEditing] = useState<any>(null);
   const [form, setForm] = useState({ ...EMPTY_FORM });
   const [showArchived, setShowArchived] = useState(false);
+  const [pendingImpact, setPendingImpact] = useState<{ activeTaskCount: number; affectedUnitCount: number } | null>(null);
+  const [checkingImpact, setCheckingImpact] = useState(false);
 
   const { data: processes = [], isLoading } = useQuery({
     queryKey: ['process-definitions'],
@@ -48,6 +51,7 @@ export default function ProcessesConfigPage() {
       setModalOpen(false);
       setEditing(null);
       setForm({ ...EMPTY_FORM });
+      setPendingImpact(null);
       toast(editing ? 'Process updated' : 'Process created', 'success');
     },
     onError: (err: any) => toast(err.message, 'error'),
@@ -73,13 +77,37 @@ export default function ProcessesConfigPage() {
     setModalOpen(true);
   };
 
-  const handleSubmit = () => {
-    saveMutation.mutate({
-      ...form,
-      defaultEstimatedMinutes: form.defaultEstimatedMinutes ? parseInt(form.defaultEstimatedMinutes) : undefined,
-      defaultPriorityLevelId: form.defaultPriorityLevelId || undefined,
-      weight: parseFloat(form.weight) || 1.0,
-    });
+  const buildPayload = () => ({
+    ...form,
+    defaultEstimatedMinutes: form.defaultEstimatedMinutes ? parseInt(form.defaultEstimatedMinutes) : undefined,
+    defaultPriorityLevelId: form.defaultPriorityLevelId || undefined,
+    weight: parseFloat(form.weight) || 1.0,
+  });
+
+  // Editing an EXISTING process takes effect instantly for every task
+  // currently referencing it (live join, not a snapshot) - check what's
+  // actually at stake before saving, rather than after something on the
+  // shop floor has already been quietly changed underneath someone.
+  // Creating a brand new process has nothing to check - nothing
+  // references it yet.
+  const handleSubmit = async () => {
+    if (!editing) {
+      saveMutation.mutate(buildPayload());
+      return;
+    }
+    setCheckingImpact(true);
+    try {
+      const impact = await api.processDefinitions.impact(editing.id);
+      if (impact.activeTaskCount > 0) {
+        setPendingImpact(impact);
+      } else {
+        saveMutation.mutate(buildPayload());
+      }
+    } catch (err: any) {
+      toast(err.message ?? 'Could not check impact', 'error');
+    } finally {
+      setCheckingImpact(false);
+    }
   };
 
   // Group by department. Archived processes stay recoverable but are hidden by default.
@@ -186,7 +214,7 @@ export default function ProcessesConfigPage() {
         footer={
           <div className="flex justify-end gap-2">
             <Button variant="secondary" onClick={() => setModalOpen(false)}>Cancel</Button>
-            <Button loading={saveMutation.isPending} disabled={!form.name || !form.code || !form.departmentId}
+            <Button loading={saveMutation.isPending || checkingImpact} disabled={!form.name || !form.code || !form.departmentId}
               onClick={handleSubmit}>
               {editing ? 'Save Changes' : 'Create Process'}
             </Button>
@@ -235,6 +263,18 @@ export default function ProcessesConfigPage() {
           </div>
         </div>
       </Modal>
+
+      <ImpactWarningModal
+        open={!!pendingImpact}
+        title="This process is currently in use"
+        lines={[
+          `${pendingImpact?.activeTaskCount ?? 0} active task(s) across ${pendingImpact?.affectedUnitCount ?? 0} unit(s) reference this process right now.`,
+          'Saving this change takes effect immediately for that work in progress - if you\'re changing checklist or verification requirements, tasks already underway will be held to the new rules straight away.',
+        ]}
+        confirming={saveMutation.isPending}
+        onConfirm={() => saveMutation.mutate(buildPayload())}
+        onCancel={() => setPendingImpact(null)}
+      />
     </div>
   );
 }

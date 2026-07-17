@@ -205,6 +205,7 @@ export const api = {
     reorder: (items: Array<{ id: string; sortOrder: number }>) =>
       api.patch<any[]>('/departments/reorder', { items }),
     delete: (id: string) => api.delete(`/departments/${id}`),
+    impact: (id: string) => api.get<{ activeTaskCount: number; unitsCurrentlyHere: number }>(`/departments/${id}/impact`),
   },
 
   priorityLevels: {
@@ -224,6 +225,7 @@ export const api = {
     create: (body: any) => api.post<any>('/process-definitions', body),
     update: (id: string, body: any) => api.patch<any>(`/process-definitions/${id}`, body),
     delete: (id: string) => api.delete(`/process-definitions/${id}`),
+    impact: (id: string) => api.get<{ activeTaskCount: number; affectedUnitCount: number }>(`/process-definitions/${id}/impact`),
   },
 
   processRoutes: {
