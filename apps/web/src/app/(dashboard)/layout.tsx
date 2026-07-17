@@ -10,7 +10,7 @@ import { cn, initials } from '@/lib/utils';
 import {
   LayoutDashboard, Users, FolderOpen, ShoppingBag, Box, Settings,
   ChevronRight, LogOut, Building2, Sliders, Wrench, ClipboardList,
-  BarChart3, Cpu, GitBranch, Tag, Package, ListChecks, Menu, X, CalendarDays, Factory, GripVertical, Eye, ClipboardCheck, Workflow,
+  BarChart3, Cpu, GitBranch, Tag, Package, ListChecks, Menu, X, CalendarDays, Factory, GripVertical, Eye, ClipboardCheck, Workflow, FlaskConical,
 } from 'lucide-react';
 
 const NAV_ITEMS = [
@@ -20,6 +20,7 @@ const NAV_ITEMS = [
   { href: '/director-dashboard', label: 'Director Dashboard', icon: BarChart3, permission: 'director:view' },
   { href: '/planner-dashboard', label: 'Planner', icon: ClipboardCheck, permission: 'unit:plan' },
   { href: '/purchasing-dashboard', label: 'Purchasing', icon: Package, permission: 'vendor-part:manage' },
+  { href: '/testing-dashboard', label: 'Testing', icon: FlaskConical, permission: 'qc:manage' },
   { href: '/manager-dashboard', label: 'Manager Dashboard', icon: ClipboardList },
   { href: '/engineering-dashboard', label: 'Designing Dashboard', icon: Wrench },
 ];

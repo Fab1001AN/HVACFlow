@@ -124,6 +124,21 @@ export class WorkflowStagesService {
     }
   }
 
+  // Powers per-stage dashboards (Testing, eventually Dispatch) - "who's
+  // actually sitting here right now" rather than a generic units list
+  // filtered client-side.
+  async unitsOnStage(stageId: string) {
+    return this.prisma.unit.findMany({
+      where: { currentWorkflowStageId: stageId, deletedAt: null },
+      include: {
+        unitType: true,
+        priorityLevel: true,
+        parts: { where: { deletedAt: null }, select: { id: true, status: true, partType: { select: { name: true } } } },
+      },
+      orderBy: { dueDate: 'asc' },
+    });
+  }
+
   private async allStagesOrdered() {
     return this.prisma.workflowStage.findMany({ orderBy: { sortOrder: 'asc' } });
   }
@@ -154,6 +169,23 @@ export class WorkflowStagesService {
     }
     if (!nextStage) throw new ConflictException('Already at the final stage');
     this.assertPermission(user, nextStage.requiredPermission);
+
+    // Assembly declaring a unit "Completed" is the one transition in
+    // this engine with a real business rule behind it, not just a
+    // permission check - explicitly required: a unit can't be marked
+    // complete while any of its parts still have unfinished work.
+    // Matched by stage name since there's no generic per-stage
+    // validation hook system (a deliberately narrower fix than building
+    // that, for this one rule that actually needs enforcing).
+    if (nextStage.name === 'Unit Completed') {
+      const parts = await this.prisma.part.findMany({ where: { unitId, deletedAt: null }, select: { status: true, partType: { select: { name: true } } } });
+      const unfinished = parts.filter((p) => p.status !== 'Completed');
+      if (unfinished.length > 0) {
+        throw new ConflictException(
+          `Cannot mark this unit completed - ${unfinished.length} part(s) still have unfinished work: ${unfinished.map((p) => p.partType.name).join(', ')}`,
+        );
+      }
+    }
 
     const updated = await this.prisma.unit.update({
       where: { id: unitId },
@@ -294,6 +326,12 @@ export class WorkflowStagesController {
   @RequirePermissions('config:manage')
   impact(@Param('id') id: string) {
     return this.service.impact(id);
+  }
+
+  @Get('workflow-stages/:id/units')
+  @RequirePermissions('unit:view')
+  unitsOnStage(@Param('id') id: string) {
+    return this.service.unitsOnStage(id);
   }
 
   @Post('workflow-stages')

@@ -43,6 +43,7 @@ async function main() {
     { code: 'unit:plan', category: 'Units', description: 'Assign parts to a unit and release it to the Production Manager' },
     { code: 'vendor-part:manage', category: 'Units', description: 'Track vendor-supplied parts on a unit (received status, arrival dates)' },
     { code: 'rework:manage', category: 'Units', description: 'Create and update rework records for completed units' },
+    { code: 'qc:manage', category: 'Units', description: 'Test units and send them back to any department with notes if something needs fixing' },
     { code: 'shipment:manage', category: 'Units', description: 'Log shipment/carrier details for a unit' },
     { code: 'part:view', category: 'Parts', description: 'View parts' },
     { code: 'part:manage', category: 'Parts', description: 'Create and edit parts' },
@@ -150,7 +151,7 @@ async function main() {
     'task:hold', 'task:reject', 'task:reassign',
     'customer:view', 'project:view', 'order:view', 'order:manage',
     'unit:view', 'unit:manage', 'part:view', 'part:manage', 'vendor-part:manage',
-    'rework:manage', 'shipment:manage',
+    'rework:manage', 'shipment:manage', 'qc:manage',
     'user:view', 'role:view', 'report:view', 'dashboard:configure',
     'department:view', 'process:view', 'machine:view',
   ];
@@ -689,6 +690,16 @@ async function main() {
     { name: 'Manager Release', sortOrder: 3, departmentId: null, requiredPermission: 'unit:manage', actionLabel: 'Release to Fabrication' },
     { name: 'Fabrication Started', sortOrder: 4, departmentId: departments['FAB'], requiredPermission: 'task:start', actionLabel: 'Start Entire Unit' },
     { name: 'Assembly Started', sortOrder: 5, departmentId: departments['ASSY'], requiredPermission: 'task:start', actionLabel: 'Start Building Unit' },
+    // These three are genuinely new stages, not shadow-written from any
+    // existing function - a unit only ever reaches them by being
+    // advanced through the workflow engine directly, starting from
+    // Assembly Started. "Unit Completed" specifically is guarded in
+    // code (advance() in units.service.ts) against advancing here if
+    // any of the unit's parts aren't fully done - the seed only sets up
+    // the stage and its permission, not that business rule.
+    { name: 'Unit Completed', sortOrder: 6, departmentId: departments['ASSY'], requiredPermission: 'task:start', actionLabel: 'Mark Unit Completed', allowsBackward: true },
+    { name: 'Testing', sortOrder: 7, departmentId: departments['QA'], requiredPermission: 'qc:manage', actionLabel: 'Unit Tested', allowsBackward: true },
+    { name: 'Dispatch', sortOrder: 8, departmentId: departments['LOG'], requiredPermission: 'shipment:manage', actionLabel: 'Dispatched' },
   ];
   for (const stage of workflowStageData) {
     await prisma.workflowStage.upsert({

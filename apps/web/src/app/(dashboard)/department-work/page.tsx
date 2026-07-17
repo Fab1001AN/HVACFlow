@@ -284,6 +284,7 @@ function StationColumns({
 }
 
 function AssemblyView({ allDepartments, canStartUnits }: { allDepartments: any[]; canStartUnits: boolean }) {
+  const qc = useQueryClient();
   const [startModalUnit, setStartModalUnit] = useState<any | null>(null);
   const purchasingActive = allDepartments.find((d: any) => d.name === 'Purchasing')?.isActive ?? false;
 
@@ -293,6 +294,20 @@ function AssemblyView({ allDepartments, canStartUnits }: { allDepartments: any[]
     refetchInterval: 20_000,
   });
 
+  // The other end of the "Unit Completed" stage I added to the workflow
+  // engine - without this button, a unit could reach Assembly Started
+  // and then have no way to actually advance into Testing/Dispatch.
+  // Backend enforces the real rule (blocks if any part isn't fully
+  // done) - this just surfaces whatever error it returns.
+  const markCompleteMutation = useMutation({
+    mutationFn: (unitId: string) => api.units.workflowAdvance(unitId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['units', 'assembly-summary'] });
+      toast('Unit marked completed', 'success');
+    },
+    onError: (e: any) => toast(e.message ?? 'Could not mark unit completed', 'error'),
+  });
+
   if (isLoading) return <div className="flex justify-center p-10"><Spinner /></div>;
 
   const wip = data?.wip ?? [];
@@ -300,7 +315,14 @@ function AssemblyView({ allDepartments, canStartUnits }: { allDepartments: any[]
 
   return (
     <div className="space-y-8">
-      <UnitSection title="WIP" description="Assembly has started building these units" units={wip} showProgress />
+      <UnitSection
+        title="WIP"
+        description="Assembly has started building these units"
+        units={wip}
+        showProgress
+        onMarkComplete={(unitId) => markCompleteMutation.mutate(unitId)}
+        markingCompleteId={markCompleteMutation.isPending ? (markCompleteMutation.variables as string) : null}
+      />
       <UnitSection
         title="Upcoming Units"
         description="Parts arriving from Fabrication and vendors - not started yet"
@@ -318,12 +340,16 @@ function UnitSection({
   units,
   showProgress,
   onStartClick,
+  onMarkComplete,
+  markingCompleteId,
 }: {
   title: string;
   description: string;
   units: any[];
   showProgress?: boolean;
   onStartClick?: (unit: any) => void;
+  onMarkComplete?: (unitId: string) => void;
+  markingCompleteId?: string | null;
 }) {
   return (
     <div>
@@ -339,7 +365,14 @@ function UnitSection({
       ) : (
         <div className="grid md:grid-cols-2 xl:grid-cols-3 gap-3">
           {units.map((unit: any) => (
-            <AssemblyUnitCard key={unit.id} unit={unit} showProgress={showProgress} onStartClick={onStartClick} />
+            <AssemblyUnitCard
+              key={unit.id}
+              unit={unit}
+              showProgress={showProgress}
+              onStartClick={onStartClick}
+              onMarkComplete={onMarkComplete}
+              markingComplete={markingCompleteId === unit.id}
+            />
           ))}
         </div>
       )}
@@ -347,7 +380,19 @@ function UnitSection({
   );
 }
 
-function AssemblyUnitCard({ unit, showProgress, onStartClick }: { unit: any; showProgress?: boolean; onStartClick?: (unit: any) => void }) {
+function AssemblyUnitCard({
+  unit,
+  showProgress,
+  onStartClick,
+  onMarkComplete,
+  markingComplete,
+}: {
+  unit: any;
+  showProgress?: boolean;
+  onStartClick?: (unit: any) => void;
+  onMarkComplete?: (unitId: string) => void;
+  markingComplete?: boolean;
+}) {
   const vendorParts = unit.vendorParts ?? [];
   const parts = unit.parts ?? [];
   const receivedCount = vendorParts.filter((vp: any) => vp.isReceived).length;
@@ -400,6 +445,18 @@ function AssemblyUnitCard({ unit, showProgress, onStartClick }: { unit: any; sho
         <Button size="sm" className="w-full mt-3" onClick={() => onStartClick(unit)}>
           <Hammer className="w-3.5 h-3.5" />
           Start Building Unit
+        </Button>
+      )}
+      {onMarkComplete && (
+        <Button
+          size="sm"
+          variant="secondary"
+          className="w-full mt-3"
+          loading={markingComplete}
+          onClick={() => onMarkComplete(unit.id)}
+        >
+          <CheckCircle2 className="w-3.5 h-3.5" />
+          Mark Unit Completed
         </Button>
       )}
     </Card>

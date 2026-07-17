@@ -186,6 +186,7 @@ export const api = {
     list: () => api.get<any[]>('/workflow-stages'),
     get: (id: string) => api.get<any>(`/workflow-stages/${id}`),
     impact: (id: string) => api.get<{ unitsHere: number }>(`/workflow-stages/${id}/impact`),
+    unitsOnStage: (id: string) => api.get<any[]>(`/workflow-stages/${id}/units`),
     create: (body: any) => api.post<any>('/workflow-stages', body),
     update: (id: string, body: any) => api.patch<any>(`/workflow-stages/${id}`, body),
     delete: (id: string) => api.delete(`/workflow-stages/${id}`),
