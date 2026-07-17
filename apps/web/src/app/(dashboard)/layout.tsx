@@ -21,7 +21,7 @@ const NAV_ITEMS = [
   { href: '/planner-dashboard', label: 'Planner', icon: ClipboardCheck, permission: 'unit:plan' },
   { href: '/purchasing-dashboard', label: 'Purchasing', icon: Package, permission: 'vendor-part:manage' },
   { href: '/manager-dashboard', label: 'Manager Dashboard', icon: ClipboardList },
-  { href: '/engineering-dashboard', label: 'Engineering Dashboard', icon: Wrench },
+  { href: '/engineering-dashboard', label: 'Designing Dashboard', icon: Wrench },
 ];
 
 const CONFIG_ITEMS = [

@@ -8,11 +8,14 @@ import { AlertTriangle, Boxes, CheckCircle2, Clock3, Factory, Truck, ShieldOff }
 import { format } from 'date-fns';
 import { cn } from '@/lib/utils';
 import { useAuthStore } from '@/store/auth.store';
+import { useZoom } from '@/hooks/use-zoom';
+import { ZoomControls } from '@/components/shared/zoom-controls';
 
 export default function DirectorDashboardPage() {
   const hasPermission = useAuthStore((s) => s.hasPermission);
   const canView = hasPermission('director:view');
   const { data, isLoading } = useQuery({ queryKey: ['director-summary'], queryFn: api.units.directorSummary, refetchInterval: 30_000, enabled: canView });
+  const { zoomPercent, zoomIn, zoomOut, canZoomIn, canZoomOut, zoomStyle } = useZoom('hvacflow:zoom:director-dashboard');
 
   if (!canView) {
     return (
@@ -48,6 +51,7 @@ export default function DirectorDashboardPage() {
     <div className="flex flex-col h-full">
       <PageHeader title="Director of Manufacturing" description="Live view of every unit, bottleneck, delay, and department workload." />
       <div className="flex-1 overflow-y-auto p-6 space-y-6">
+        <div style={zoomStyle} className="space-y-6">
         <div className="grid grid-cols-2 xl:grid-cols-5 gap-4">
           {cards.map(({ label, value, icon: Icon, className }) => (
             <Card key={label} className="p-4">
@@ -74,7 +78,9 @@ export default function DirectorDashboardPage() {
             </div>
           </Card>
         </div>
+        </div>
       </div>
+      <ZoomControls zoomPercent={zoomPercent} zoomIn={zoomIn} zoomOut={zoomOut} canZoomIn={canZoomIn} canZoomOut={canZoomOut} />
     </div>
   );
 }

@@ -7,6 +7,8 @@ import { Badge, Button, Card, EmptyState, PageHeader, ProgressBar, Spinner, toas
 import { TaskDrawer } from '@/features/tasks/task-drawer';
 import { AlertTriangle } from 'lucide-react';
 import { format } from 'date-fns';
+import { useZoom } from '@/hooks/use-zoom';
+import { ZoomControls } from '@/components/shared/zoom-controls';
 
 // See the identical helper + comment in production-calendar/page.tsx -
 // productionMonth is always UTC midnight on the 1st; parsing it with a
@@ -62,10 +64,11 @@ function currentProcesses(unit: any): string[] {
 export default function ManagerDashboard() {
   const qc = useQueryClient();
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  const { zoomPercent, zoomIn, zoomOut, canZoomIn, canZoomOut, zoomStyle } = useZoom('hvacflow:zoom:manager-dashboard');
   const { data, isLoading } = useQuery({ queryKey: ['manager-summary'], queryFn: api.units.managerSummary, refetchInterval: 15000 });
   const release = useMutation({ mutationFn: (id: string) => api.units.release(id), onSuccess: () => { qc.invalidateQueries({ queryKey: ['manager-summary'] }); toast('Unit released directly to Fabrication', 'success'); }, onError: (e: any) => toast(e.message, 'error') });
   const groups = [{ title: 'Awaiting Production Release', units: data?.awaitingRelease ?? [], action: true }, { title: 'Released — Waiting for Fabrication', units: data?.released ?? [] }, { title: 'In Production by Department', units: data?.started ?? [] }];
-  return <div><PageHeader title="Manager Dashboard" description="Release engineering-complete units directly to Fabrication and track every part across departments." />{isLoading ? <div className="p-12 flex justify-center"><Spinner /></div> : <div className="p-6 grid xl:grid-cols-3 gap-5">{groups.map((g) => <Card key={g.title} className="p-4"><div className="flex justify-between mb-4"><h2 className="font-semibold">{g.title}</h2><Badge variant="muted">{g.units.length}</Badge></div><div className="space-y-3">{g.units.length === 0 ? <EmptyState title="No units" /> : g.units.map((u: any) => {
+  return <div className="flex flex-col h-full"><PageHeader title="Manager Dashboard" description="Release engineering-complete units directly to Fabrication and track every part across departments." />{isLoading ? <div className="p-12 flex justify-center"><Spinner /></div> : <div className="flex-1 overflow-y-auto p-6"><div style={zoomStyle} className="grid xl:grid-cols-3 gap-5">{groups.map((g) => <Card key={g.title} className="p-4"><div className="flex justify-between mb-4"><h2 className="font-semibold">{g.title}</h2><Badge variant="muted">{g.units.length}</Badge></div><div className="space-y-3">{g.units.length === 0 ? <EmptyState title="No units" /> : g.units.map((u: any) => {
     const processes = currentProcesses(u);
     return <div key={u.id} className="border rounded-lg p-3">
       <div className="flex justify-between gap-3">
@@ -87,5 +90,5 @@ export default function ManagerDashboard() {
       {g.action && <Button className="mt-3 w-full" size="sm" disabled={u.engineeringStatus !== 'ReleasedToManufacturing' || u.isBlocked} loading={release.isPending && release.variables === u.id} onClick={() => release.mutate(u.id)}>Release Entire Unit to Fabrication</Button>}
       <DepartmentProgress departments={u.departmentProgress} onTaskClick={setSelectedTaskId} />
     </div>;
-  })}</div></Card>)}</div>}<TaskDrawer taskId={selectedTaskId} onClose={() => setSelectedTaskId(null)} /></div>;
+  })}</div></Card>)}</div></div>}<ZoomControls zoomPercent={zoomPercent} zoomIn={zoomIn} zoomOut={zoomOut} canZoomIn={canZoomIn} canZoomOut={canZoomOut} /><TaskDrawer taskId={selectedTaskId} onClose={() => setSelectedTaskId(null)} /></div>;
 }

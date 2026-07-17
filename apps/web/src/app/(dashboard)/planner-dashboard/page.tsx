@@ -8,6 +8,8 @@ import { api } from '@/lib/api';
 import { Badge, Button, Card, EmptyState, PageHeader, Spinner, toast } from '@/components/shared';
 import { Package, Rocket, X, Search, ChevronLeft, ChevronRight, GripVertical } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { useZoom } from '@/hooks/use-zoom';
+import { ZoomControls } from '@/components/shared/zoom-controls';
 
 const PART_DRAG_TYPE = 'application/x-hvacflow-parttype';
 const MONTHS_VISIBLE = 4;
@@ -25,6 +27,7 @@ function parseMonthSafe(isoString: string): Date {
 
 export default function PlannerDashboardPage() {
   const queryClient = useQueryClient();
+  const { zoomPercent, zoomIn, zoomOut, canZoomIn, canZoomOut, zoomStyle } = useZoom('hvacflow:zoom:planner-dashboard');
   const [search, setSearch] = useState('');
   const [anchor, setAnchor] = useState(startOfMonth(new Date()));
   const { data: units = [], isLoading } = useQuery({
@@ -235,7 +238,7 @@ export default function PlannerDashboardPage() {
             </div>
           ) : (
             <div className="flex-1 overflow-x-auto overflow-y-hidden">
-              <div className="flex gap-4 p-4 h-full min-w-max">
+              <div style={zoomStyle} className="flex gap-4 p-4 h-full min-w-max">
                 {months.map((month) => {
                   const key = format(month, 'yyyy-MM');
                   const monthUnits = unitsByMonthKey.get(key) ?? [];
@@ -293,6 +296,7 @@ export default function PlannerDashboardPage() {
           )}
         </div>
       </div>
+      <ZoomControls zoomPercent={zoomPercent} zoomIn={zoomIn} zoomOut={zoomOut} canZoomIn={canZoomIn} canZoomOut={canZoomOut} />
     </div>
   );
 }

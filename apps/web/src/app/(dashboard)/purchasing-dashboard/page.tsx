@@ -7,11 +7,14 @@ import { api } from '@/lib/api';
 import { Badge, Button, Card, EmptyState, Input, Modal, PageHeader, Spinner, toast } from '@/components/shared';
 import { Package, CheckCircle2, Clock3, Search, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { useZoom } from '@/hooks/use-zoom';
+import { ZoomControls } from '@/components/shared/zoom-controls';
 
 const PART_DRAG_TYPE = 'application/x-hvacflow-parttype';
 
 export default function PurchasingDashboardPage() {
   const queryClient = useQueryClient();
+  const { zoomPercent, zoomIn, zoomOut, canZoomIn, canZoomOut, zoomStyle } = useZoom('hvacflow:zoom:purchasing-dashboard');
   const [search, setSearch] = useState('');
   const [draggedTypeId, setDraggedTypeId] = useState<string | null>(null);
   const draggedTypeRef = useRef<string | null>(null);
@@ -105,9 +108,12 @@ export default function PurchasingDashboardPage() {
         title="Purchasing"
         description="Drag a part type onto a unit to log whether it's been ordered/received from the vendor, and when."
       />
-      <div className="flex-1 overflow-y-auto p-6 grid xl:grid-cols-[260px_1fr] gap-6">
-        {/* Vendor part palette */}
-        <Card className="p-4 h-fit xl:sticky xl:top-6">
+      <div className="flex-1 flex overflow-hidden">
+        {/* Vendor part palette - fixed width, own scroll (not sticky-in-
+            a-grid, which caused a real layout bug on the Planner
+            Dashboard - fixed here proactively before it surfaced the
+            same way). */}
+        <div className="w-64 flex-shrink-0 border-r border-border p-4 overflow-y-auto">
           <div className="flex items-center gap-2 mb-3">
             <Package className="w-4 h-4 text-muted-foreground" />
             <h2 className="text-sm font-semibold">Vendor Parts</h2>
@@ -139,10 +145,11 @@ export default function PurchasingDashboardPage() {
               </p>
             )}
           </div>
-        </Card>
+        </div>
 
         {/* Units */}
-        <div className="space-y-4">
+        <div className="flex-1 overflow-y-auto p-6">
+        <div style={zoomStyle} className="space-y-4">
           <div className="relative max-w-sm">
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground pointer-events-none" />
             <input
@@ -208,7 +215,9 @@ export default function PurchasingDashboardPage() {
             </div>
           )}
         </div>
+        </div>
       </div>
+      <ZoomControls zoomPercent={zoomPercent} zoomIn={zoomIn} zoomOut={zoomOut} canZoomIn={canZoomIn} canZoomOut={canZoomOut} />
 
       <ReceiveStatusModal
         state={modalState}

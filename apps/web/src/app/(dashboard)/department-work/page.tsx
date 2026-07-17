@@ -11,6 +11,8 @@ import { useAuthStore } from '@/store/auth.store';
 import { useWsEvent } from '@/lib/websocket';
 import { Rocket, CheckCircle2, Clock3, Hammer, Package, GripVertical } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { useZoom } from '@/hooks/use-zoom';
+import { ZoomControls } from '@/components/shared/zoom-controls';
 
 // The real interactive tool for a department supervisor - click a
 // card's "Task Completed" button to advance it, no side panel needed
@@ -20,6 +22,7 @@ import { cn } from '@/lib/utils';
 export default function SupervisorDashboardPage() {
   const qc = useQueryClient();
   const { user, hasPermission } = useAuthStore();
+  const { zoomPercent, zoomIn, zoomOut, canZoomIn, canZoomOut, zoomStyle } = useZoom('hvacflow:zoom:supervisor-dashboard');
   const [departmentId, setDepartmentId] = useState('');
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
 
@@ -106,6 +109,7 @@ export default function SupervisorDashboardPage() {
         description={isAssembly ? "Units coming from Fabrication, plus any vendor parts they need. Check vendor parts before starting a build." : "Your department's active work. Tap Task Completed on a card to advance it - no separate start step needed."}
       />
       <div className="p-6 space-y-5 flex-1 overflow-y-auto">
+        <div style={zoomStyle}>
         {!canViewAllDepartments && !assignedDepartmentIds?.length ? (
           <EmptyState title="No department assigned" description="Ask an admin to assign you to a department in Configuration → Users." />
         ) : (
@@ -167,7 +171,9 @@ export default function SupervisorDashboardPage() {
             )}
           </>
         )}
+        </div>
       </div>
+      <ZoomControls zoomPercent={zoomPercent} zoomIn={zoomIn} zoomOut={zoomOut} canZoomIn={canZoomIn} canZoomOut={canZoomOut} />
       {!isAssembly && <TaskDrawer taskId={selectedTaskId} onClose={() => setSelectedTaskId(null)} />}
     </div>
   );
