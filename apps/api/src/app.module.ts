@@ -22,6 +22,7 @@ import { UnitsModule } from './modules/units/units.module';
 import { VendorPartsModule } from './modules/vendor-parts/vendor-parts.module';
 import { ActivityLogModule } from './modules/activity-log/activity-log.module';
 import { OrganizationSettingsModule } from './modules/organization-settings/organization-settings.module';
+import { WorkflowStagesModule } from './modules/workflow-stages/workflow-stages.module';
 import { PartsModule } from './modules/parts/parts.module';
 import { ProductionTasksModule } from './modules/production-tasks/production-tasks.module';
 import { WorkflowProgressModule } from './modules/workflow-progress/workflow-progress.module';
@@ -68,6 +69,7 @@ import { ReportsModule } from './modules/reports/reports.module';
     VendorPartsModule,
     ActivityLogModule,
     OrganizationSettingsModule,
+    WorkflowStagesModule,
     PartsModule,
 
     // ─── Production Task Engine ─────────────────────────────────────────────

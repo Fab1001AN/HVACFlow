@@ -10,7 +10,7 @@ import { cn, initials } from '@/lib/utils';
 import {
   LayoutDashboard, Users, FolderOpen, ShoppingBag, Box, Settings,
   ChevronRight, LogOut, Building2, Sliders, Wrench, ClipboardList,
-  BarChart3, Cpu, GitBranch, Tag, Package, ListChecks, Menu, X, CalendarDays, Factory, GripVertical, Eye, ClipboardCheck,
+  BarChart3, Cpu, GitBranch, Tag, Package, ListChecks, Menu, X, CalendarDays, Factory, GripVertical, Eye, ClipboardCheck, Workflow,
 } from 'lucide-react';
 
 const NAV_ITEMS = [
@@ -27,6 +27,7 @@ const NAV_ITEMS = [
 const CONFIG_ITEMS = [
   { href: '/config/general', label: 'General', icon: Sliders },
   { href: '/config/departments', label: 'Departments', icon: Building2 },
+  { href: '/config/workflow-stages', label: 'Workflow Stages', icon: Workflow },
   { href: '/config/priority-levels', label: 'Priority Levels', icon: Tag },
   { href: '/config/processes', label: 'Processes', icon: Cpu },
   { href: '/config/routes', label: 'Process Routes', icon: GitBranch },

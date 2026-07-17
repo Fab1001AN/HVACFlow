@@ -332,6 +332,11 @@ model Unit {
   manufacturingStartedAt   DateTime?
   assignedTeamName         String? // captured when Assembly clicks "Start Building Unit"
   assemblyStartedAt        DateTime?
+  // New generic engine's position tracker - nullable and untouched by
+  // the existing Engineering/Planner/Manager/Assembly flow for now.
+  // Only units created/advanced through the new generic
+  // /units/:id/workflow/* endpoints ever set this.
+  currentWorkflowStageId   String?
   isBlocked                Boolean    @default(false)
   holdReason               String?
   oneDriveFolderUrl        String?
@@ -357,6 +362,7 @@ model Unit {
   comments          UnitComment[]
   vendorParts       VendorPart[]
   activityLogs      ActivityLog[]
+  currentWorkflowStage WorkflowStage? @relation("UnitWorkflowStage", fields: [currentWorkflowStageId], references: [id], onDelete: SetNull)
 
   @@index([orderId])
   @@index([priorityLevelId])
@@ -389,6 +395,9 @@ enum ActivityAction {
   VendorPartLogged
   UnitBlocked
   UnitUnblocked
+  WorkflowStageAdvanced
+  WorkflowStageMovedBack
+  WorkflowStageSet
 }
 
 model ActivityLog {
@@ -489,8 +498,38 @@ model Department {
   machines           Machine[]
   tasks              ProductionTask[]
   currentUnits       Unit[]
+  workflowStages     WorkflowStage[]
 
   @@map("departments")
+}
+
+// Step 2 of the workflow-configurability plan: a generic, admin-defined
+// pipeline stage - the building block that will eventually replace the
+// hardcoded Planner -> Manager -> Fabrication -> Assembly sequence
+// (Unit.engineeringStatus / productionReleaseStatus / etc.). Built and
+// shipped as new, additive infrastructure FIRST, proven to work on its
+// own via its own admin UI - migrating the real, currently-working
+// pipeline onto it is a deliberately separate, later step (Step 3), not
+// bundled into this one. Ripping out a working state machine and a
+// brand new one in the same change is exactly how you end up unable to
+// tell which part broke.
+model WorkflowStage {
+  id                 String   @id @default(uuid())
+  name               String   @unique
+  sortOrder          Int      @default(0)
+  isActive           Boolean  @default(true)
+  departmentId       String? // null = cross-department stage (e.g. a Planner/Manager-style review step, not tied to shop-floor work)
+  requiredPermission String  // permission code needed to advance a unit out of this stage
+  actionLabel        String  @default("Advance") // button text shown for the advance action
+  allowsBackward     Boolean @default(false) // can a unit be sent back to the previous stage from here
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  department Department? @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+  units      Unit[]       @relation("UnitWorkflowStage")
+
+  @@index([sortOrder])
+  @@map("workflow_stages")
 }
 
 model ProcessDefinition {

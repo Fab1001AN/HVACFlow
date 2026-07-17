@@ -182,6 +182,17 @@ export const api = {
     request<T>('DELETE', path, undefined, options),
 
   // ─── Auth ────────────────────────────────────────────────────────────────
+  workflowStages: {
+    list: () => api.get<any[]>('/workflow-stages'),
+    get: (id: string) => api.get<any>(`/workflow-stages/${id}`),
+    impact: (id: string) => api.get<{ unitsHere: number }>(`/workflow-stages/${id}/impact`),
+    create: (body: any) => api.post<any>('/workflow-stages', body),
+    update: (id: string, body: any) => api.patch<any>(`/workflow-stages/${id}`, body),
+    delete: (id: string) => api.delete(`/workflow-stages/${id}`),
+    reorder: (items: Array<{ id: string; sortOrder: number }>) =>
+      api.patch<any[]>('/workflow-stages/reorder', { items }),
+  },
+
   organizationSettings: {
     get: () => api.get<{ id: string; name: string }>('/organization-settings'),
     update: (name: string) => api.patch<{ id: string; name: string }>('/organization-settings', { name }),
@@ -322,6 +333,9 @@ export const api = {
     activity: (id: string) => api.get<any[]>(`/units/${id}/activity`),
     markPlanned: (id: string) => api.post<any>(`/units/${id}/mark-planned`, {}),
     startAssembly: (id: string, teamName: string) => api.post<any>(`/units/${id}/start-assembly`, { teamName }),
+    workflowAdvance: (id: string) => api.post<any>(`/units/${id}/workflow/advance`, {}),
+    workflowMoveBack: (id: string, reason?: string) => api.post<any>(`/units/${id}/workflow/move-back`, { reason }),
+    workflowSetStage: (id: string, stageId: string) => api.post<any>(`/units/${id}/workflow/set-stage`, { stageId }),
     listByOrder: (orderId: string, params?: any) =>
       api.get<any>(`/orders/${orderId}/units`, { params }),
     get: (id: string) => api.get<any>(`/units/${id}`),

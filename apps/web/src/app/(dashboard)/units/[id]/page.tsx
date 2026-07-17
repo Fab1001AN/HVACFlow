@@ -6,7 +6,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { useAuthStore } from '@/store/auth.store';
 import { PageHeader, Button, EmptyState, Spinner, Modal, Input, Select, Card, ProgressBar, Textarea, Badge } from '@/components/shared';
-import { Plus, Package, ChevronRight, CheckCircle, Circle, Clock, AlertCircle, ExternalLink, MessageSquare, AlertTriangle, History } from 'lucide-react';
+import { Plus, Package, ChevronRight, CheckCircle, Circle, Clock, AlertCircle, ExternalLink, MessageSquare, AlertTriangle, History, Workflow } from 'lucide-react';
 import Link from 'next/link';
 import { toast } from '@/components/shared';
 import { cn, PART_STATUS_BG, STATUS_BG, STATUS_LABELS } from '@/lib/utils';
@@ -61,6 +61,42 @@ export default function UnitDetailPage() {
       queryClient.invalidateQueries({ queryKey: ['unit', id] });
       queryClient.invalidateQueries({ queryKey: ['units'] });
       toast('Unit updated', 'success');
+    },
+    onError: (err: any) => toast(err.message, 'error'),
+  });
+
+  // New generic workflow engine (Step 2) - standalone from the existing
+  // Engineering/Planner/Manager/Assembly flow above. Exists here so it
+  // can actually be exercised end to end, not just CRUD'd in
+  // Configuration with no way to prove it moves a real unit.
+  const { data: workflowStages = [] } = useQuery({
+    queryKey: ['workflow-stages'],
+    queryFn: () => api.workflowStages.list(),
+    enabled: hasPermission('config:manage'),
+  });
+  const workflowAdvanceMutation = useMutation({
+    mutationFn: () => api.units.workflowAdvance(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['unit', id] });
+      toast('Advanced to the next stage', 'success');
+    },
+    onError: (err: any) => toast(err.message, 'error'),
+  });
+  const workflowMoveBackMutation = useMutation({
+    mutationFn: () => api.units.workflowMoveBack(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['unit', id] });
+      toast('Sent back to the previous stage', 'success');
+    },
+    onError: (err: any) => toast(err.message, 'error'),
+  });
+  const [setStageId, setSetStageId] = useState('');
+  const workflowSetStageMutation = useMutation({
+    mutationFn: () => api.units.workflowSetStage(id, setStageId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['unit', id] });
+      setSetStageId('');
+      toast('Stage set (admin override)', 'success');
     },
     onError: (err: any) => toast(err.message, 'error'),
   });
@@ -175,6 +211,42 @@ export default function UnitDetailPage() {
               {(unit.comments ?? []).map((item: any) => <div key={item.id} className={cn('rounded-md border border-border p-2.5', item.isDelay && 'border-amber-500/40 bg-amber-500/5')}><div className="flex justify-between gap-3 text-xs"><span className="font-medium">{item.user?.name}</span><span className="text-muted-foreground">{new Date(item.createdAt).toLocaleString()}</span></div><p className="text-sm mt-1 whitespace-pre-wrap">{item.message}</p></div>)}
               {!unit.comments?.length && <p className="text-xs text-muted-foreground">No comments yet.</p>}
             </div>
+          </Card>
+
+          <Card className="p-4">
+            <div className="flex items-center gap-2 mb-1"><Workflow className="w-4 h-4" /><h2 className="text-sm font-semibold">Workflow Engine (new)</h2></div>
+            <p className="text-xs text-muted-foreground mb-4">Standalone from the pipeline above - only moves if this unit has been put on the new engine.</p>
+            <div className="flex items-center justify-between mb-3">
+              <span className="text-sm">Current stage</span>
+              <Badge variant={unit.currentWorkflowStage ? 'default' : 'muted'}>
+                {unit.currentWorkflowStage?.name ?? 'Not on this engine yet'}
+              </Badge>
+            </div>
+            <div className="flex gap-2 mb-4">
+              <Button size="sm" className="flex-1" loading={workflowAdvanceMutation.isPending} onClick={() => workflowAdvanceMutation.mutate()}>
+                Advance
+              </Button>
+              <Button size="sm" variant="secondary" className="flex-1" loading={workflowMoveBackMutation.isPending} onClick={() => workflowMoveBackMutation.mutate()}>
+                Move Back
+              </Button>
+            </div>
+            {hasPermission('config:manage') && (
+              <div className="pt-3 border-t border-border">
+                <p className="text-xs text-muted-foreground mb-2">Admin override - jump directly to any stage</p>
+                <div className="flex gap-2">
+                  <Select
+                    value={setStageId}
+                    onChange={(e) => setSetStageId(e.target.value)}
+                    options={(workflowStages as any[]).map((s: any) => ({ value: s.id, label: s.name }))}
+                    placeholder="Select a stage"
+                    className="flex-1"
+                  />
+                  <Button size="sm" variant="secondary" disabled={!setStageId} loading={workflowSetStageMutation.isPending} onClick={() => workflowSetStageMutation.mutate()}>
+                    Set
+                  </Button>
+                </div>
+              </div>
+            )}
           </Card>
 
           <Card className="p-4">
