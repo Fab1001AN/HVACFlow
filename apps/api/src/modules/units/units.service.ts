@@ -373,12 +373,32 @@ export class UnitsService {
       ...this.unitSummaryInclude(),
       parts: { where: { deletedAt: null }, include: { partType: true } },
       vendorParts: { include: { partType: true } },
+      currentWorkflowStage: { select: { name: true, sortOrder: true } },
     };
     const baseWhere = { deletedAt: null, status: { notIn: [UnitStatus.Completed, UnitStatus.Dispatched] } };
 
+    // assemblyStartedAt is set once, permanently, the moment Assembly
+    // clicks "Start Building Unit" - it never gets cleared, so on its
+    // own it can't tell "still being built" apart from "finished
+    // Assembly ages ago and is now sitting in Testing or Dispatch".
+    // Without also checking the new workflow engine's actual current
+    // position, a unit that's fully progressed past Assembly would
+    // clutter this WIP list forever. unit.status (Completed/Dispatched)
+    // doesn't help here either - marking "Unit Completed" via the
+    // workflow engine only updates currentWorkflowStageId, it was never
+    // wired to touch unit.status at all.
+    const PAST_ASSEMBLY_STAGE_NAMES = ['Unit Completed', 'Testing', 'Dispatch'];
+
     const [wip, upcoming] = await Promise.all([
       this.prisma.unit.findMany({
-        where: { ...baseWhere, assemblyStartedAt: { not: null } },
+        where: {
+          ...baseWhere,
+          assemblyStartedAt: { not: null },
+          OR: [
+            { currentWorkflowStageId: null },
+            { currentWorkflowStage: { name: { notIn: PAST_ASSEMBLY_STAGE_NAMES } } },
+          ],
+        },
         include,
         orderBy: [{ dueDate: 'asc' }],
       }),
