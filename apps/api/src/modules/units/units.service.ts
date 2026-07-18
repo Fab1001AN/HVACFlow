@@ -130,7 +130,27 @@ export class UnitsService {
   }
 
   async directorSummary() {
-    const units = await this.prisma.unit.findMany({ where: { deletedAt: null, status: { notIn: ['Completed', 'Dispatched'] } }, include: this.unitSummaryInclude(), orderBy: [{ isBlocked: 'desc' }, { dueDate: 'asc' }, { priorityPosition: 'asc' }] });
+    // unit.status (Completed/Dispatched) is never actually written by the
+    // new workflow engine - marking a unit "Dispatched" via the Testing/
+    // Dispatch stages only ever updates currentWorkflowStageId, so the
+    // status filter below never excludes anything on its own. A unit
+    // that's fully shipped/dispatched would otherwise sit in the
+    // Director's "active" totals forever. Mirrors the same fix already
+    // applied to assemblySummary() - exclude by actual workflow position,
+    // not the legacy status field.
+    const TERMINAL_STAGE_NAMES = ['Dispatch'];
+    const units = await this.prisma.unit.findMany({
+      where: {
+        deletedAt: null,
+        status: { notIn: ['Completed', 'Dispatched'] },
+        OR: [
+          { currentWorkflowStageId: null },
+          { currentWorkflowStage: { name: { notIn: TERMINAL_STAGE_NAMES } } },
+        ],
+      },
+      include: { ...this.unitSummaryInclude(), currentWorkflowStage: { select: { name: true, sortOrder: true } } },
+      orderBy: [{ isBlocked: 'desc' }, { dueDate: 'asc' }, { priorityPosition: 'asc' }],
+    });
     const now = new Date();
 
     // Surface the most recent "stuck" comment per unit to the Director.
@@ -196,10 +216,27 @@ export class UnitsService {
   }
 
   async managerSummary() {
+    // Same staleness bug as directorSummary()/assemblySummary(): status
+    // notIn ['Completed','Dispatched'] never actually fires, since the
+    // workflow engine only writes currentWorkflowStageId. Without this,
+    // a unit that finished Assembly, passed Testing, and was Dispatched
+    // would sit in the "started" bucket below forever, since
+    // productionReleaseStatus is set once to Started and never changes
+    // again. Once a unit is past Assembly Started, the Manager's job on
+    // it is done - exclude it the same way assemblySummary() does.
+    const PAST_ASSEMBLY_STAGE_NAMES = ['Unit Completed', 'Testing', 'Dispatch'];
     const units = await this.prisma.unit.findMany({
-      where: { deletedAt: null, status: { notIn: ['Completed', 'Dispatched'] } },
+      where: {
+        deletedAt: null,
+        status: { notIn: ['Completed', 'Dispatched'] },
+        OR: [
+          { currentWorkflowStageId: null },
+          { currentWorkflowStage: { name: { notIn: PAST_ASSEMBLY_STAGE_NAMES } } },
+        ],
+      },
       include: {
         ...this.unitSummaryInclude(),
+        currentWorkflowStage: { select: { name: true, sortOrder: true } },
         parts: {
           where: { deletedAt: null },
           include: {
