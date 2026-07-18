@@ -1,5 +1,5 @@
 import {
-  Injectable, NotFoundException,
+  Injectable, NotFoundException, ConflictException,
   Controller, Get, Post, Patch,
   Body, Param, Module,
 } from '@nestjs/common';
@@ -25,6 +25,15 @@ class UpdateReworkDto {
   @IsOptional() @IsEnum(ReworkStatus) status?: ReworkStatus;
   @IsOptional() @IsString() @MaxLength(2000) notes?: string;
   @IsOptional() @IsDateString() reshippedAt?: string;
+}
+
+class ReshipDto {
+  @IsOptional() @IsString() @MaxLength(200) carrierName?: string;
+  @IsOptional() @IsDateString() shipDate?: string;
+  @IsOptional() @IsString() @MaxLength(100) truckNumber?: string;
+  @IsOptional() @IsString() @MaxLength(100) trackingNumber?: string;
+  @IsOptional() @IsString() @MaxLength(200) driverName?: string;
+  @IsOptional() @IsString() @MaxLength(2000) notes?: string;
 }
 
 // ─── Service ──────────────────────────────────────────────────────────────────
@@ -90,6 +99,54 @@ export class ReworkService {
     }
     return updated;
   }
+
+  // Previously two separate frontend calls (create a ShipmentRecord, then
+  // PATCH the rework's reshippedAt) with a real partial-failure risk: if
+  // the second call failed, the unit would show a shipment logged with no
+  // record it was actually a reship, or a rework marked reshipped with no
+  // corresponding ShipmentRecord to prove it went out. Combined into one
+  // atomic transaction - either both happen or neither does.
+  async reship(id: string, dto: ReshipDto, userId: string) {
+    const existing = await this.prisma.unitRework.findUnique({ where: { id } });
+    if (!existing) throw new NotFoundException('Rework record not found');
+    if (existing.status !== ReworkStatus.Completed) {
+      throw new ConflictException('Mark this rework Completed before logging a reship');
+    }
+    if (existing.reshippedAt) {
+      throw new ConflictException('This rework has already been reshipped');
+    }
+
+    const now = new Date();
+    const [shipment, rework] = await this.prisma.$transaction([
+      this.prisma.shipmentRecord.create({
+        data: {
+          unitId: existing.unitId,
+          carrierName: dto.carrierName,
+          shipDate: dto.shipDate ? new Date(dto.shipDate) : now,
+          truckNumber: dto.truckNumber,
+          trackingNumber: dto.trackingNumber,
+          driverName: dto.driverName,
+          notes: dto.notes ?? `Reship after rework: ${existing.issue}`,
+          createdByUserId: userId,
+        },
+        include: { createdBy: { select: { id: true, name: true } } },
+      }),
+      this.prisma.unitRework.update({
+        where: { id },
+        data: { reshippedAt: now },
+        include: { assignedTo: { select: { id: true, name: true } }, createdBy: { select: { id: true, name: true } } },
+      }),
+    ]);
+
+    await this.activityLog.log({
+      unitId: existing.unitId,
+      userId,
+      action: ActivityAction.ShipmentLogged,
+      description: `Reshipped after rework: ${existing.issue}`,
+    });
+
+    return { shipment, rework };
+  }
 }
 
 // ─── Controller ───────────────────────────────────────────────────────────────
@@ -116,6 +173,12 @@ export class ReworkController {
   @RequirePermissions('rework:manage')
   update(@Param('id') id: string, @Body() dto: UpdateReworkDto, @CurrentUser() user: JwtPayload) {
     return this.service.update(id, dto, user.sub);
+  }
+
+  @Post('reworks/:id/reship')
+  @RequirePermissions('rework:manage')
+  reship(@Param('id') id: string, @Body() dto: ReshipDto, @CurrentUser() user: JwtPayload) {
+    return this.service.reship(id, dto, user.sub);
   }
 }
 
