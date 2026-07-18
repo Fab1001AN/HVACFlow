@@ -700,6 +700,13 @@ async function main() {
     { name: 'Unit Completed', sortOrder: 6, departmentId: departments['ASSY'], requiredPermission: 'task:start', actionLabel: 'Mark Unit Completed', allowsBackward: true },
     { name: 'Testing', sortOrder: 7, departmentId: departments['QA'], requiredPermission: 'qc:manage', actionLabel: 'Unit Tested', allowsBackward: true },
     { name: 'Dispatch', sortOrder: 8, departmentId: departments['LOG'], requiredPermission: 'shipment:manage', actionLabel: 'Dispatched' },
+    // Genuine terminal stage. Dispatch used to be the last stage, which
+    // meant a shipped unit had nowhere to advance into and sat on the
+    // Dispatch "Ready to Ship" list forever. Same permission as Dispatch
+    // since reaching this stage is an automatic consequence of logging a
+    // shipment (ShipmentService.create()), not a separate manual action -
+    // whoever can log the shipment can trigger the advance.
+    { name: 'Shipped', sortOrder: 9, departmentId: null, requiredPermission: 'shipment:manage', actionLabel: 'Mark Shipped', allowsBackward: false },
   ];
   for (const stage of workflowStageData) {
     await prisma.workflowStage.upsert({
