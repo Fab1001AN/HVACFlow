@@ -10,7 +10,7 @@ import { cn, initials } from '@/lib/utils';
 import {
   LayoutDashboard, Users, FolderOpen, ShoppingBag, Box, Settings,
   ChevronRight, LogOut, Building2, Sliders, Wrench, ClipboardList,
-  BarChart3, Cpu, GitBranch, Tag, Package, ListChecks, Menu, X, CalendarDays, Factory, GripVertical, Eye, ClipboardCheck, Workflow, FlaskConical,
+  BarChart3, Cpu, GitBranch, Tag, Package, ListChecks, Menu, X, CalendarDays, Factory, GripVertical, Eye, ClipboardCheck, Workflow, FlaskConical, Truck,
 } from 'lucide-react';
 
 const NAV_ITEMS = [
@@ -21,6 +21,11 @@ const NAV_ITEMS = [
   { href: '/planner-dashboard', label: 'Planner', icon: ClipboardCheck, permission: 'unit:plan' },
   { href: '/purchasing-dashboard', label: 'Purchasing', icon: Package, permission: 'vendor-part:manage' },
   { href: '/testing-dashboard', label: 'Testing', icon: FlaskConical, permission: 'qc:manage' },
+  // anyPermission = OR logic: visible to Shipping staff (shipment:manage)
+  // AND to Directors (report:view) who don't have full shipment rights.
+  // Mirrors the backend's assertReportAccess() on this endpoint - the
+  // single `permission` field is AND-only, same as the API's global guard.
+  { href: '/dispatch-report', label: 'Dispatch Report', icon: Truck, anyPermission: ['shipment:manage', 'report:view'] },
   { href: '/manager-dashboard', label: 'Manager Dashboard', icon: ClipboardList },
   { href: '/engineering-dashboard', label: 'Designing Dashboard', icon: Wrench },
 ];
@@ -154,7 +159,10 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   }
 
   const isConfigActive = pathname.startsWith('/config');
-  const visibleNavItems = navItems.filter((item: any) => !item.permission || hasPermission(item.permission));
+  const visibleNavItems = navItems.filter((item: any) => {
+    if (item.anyPermission) return item.anyPermission.some((code: string) => hasPermission(code));
+    return !item.permission || hasPermission(item.permission);
+  });
 
   return (
     <div className="flex h-screen bg-background overflow-hidden">

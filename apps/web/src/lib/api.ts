@@ -166,6 +166,30 @@ export class ApiError extends Error {
   }
 }
 
+// Authenticated file download. A plain <a href> can't carry the JWT
+// Authorization header, so protected CSV/PDF endpoints have to be
+// fetched with the header, converted to a blob, and downloaded via a
+// temporary object-URL anchor instead.
+export async function downloadFile(path: string, filename: string): Promise<void> {
+  const token = getToken();
+  const res = await fetch(buildUrl(path), {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+  if (!res.ok) {
+    const error = await res.json().catch(() => ({ message: 'Download failed' }));
+    throw new ApiError(res.status, error.message ?? 'Download failed');
+  }
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
+}
+
 // ─── Typed API methods ────────────────────────────────────────────────────────
 
 export const api = {
@@ -371,12 +395,14 @@ export const api = {
     listByUnit: (unitId: string) => api.get<any[]>(`/units/${unitId}/reworks`),
     create: (unitId: string, body: any) => api.post<any>(`/units/${unitId}/reworks`, body),
     update: (id: string, body: any) => api.patch<any>(`/reworks/${id}`, body),
+    reship: (id: string, body: any) => api.post<{ shipment: any; rework: any }>(`/reworks/${id}/reship`, body),
   },
 
   shipments: {
     listByUnit: (unitId: string) => api.get<any[]>(`/units/${unitId}/shipments`),
     create: (unitId: string, body: any) => api.post<any>(`/units/${unitId}/shipments`, body),
     update: (id: string, body: any) => api.patch<any>(`/shipments/${id}`, body),
+    dispatchReport: () => api.get<any[]>('/shipments/dispatch-report'),
   },
 
   vendorParts: {
