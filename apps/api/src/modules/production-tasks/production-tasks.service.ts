@@ -374,6 +374,115 @@ export class ProductionTasksService {
     return updated;
   }
 
+  // REOPEN: a previously-completed task back to Ready so its work can be
+  // redone (e.g. QC found a defect after the unit finished). Because the
+  // task sequence is a nextTaskId chain, reopening one task mid-sequence
+  // would otherwise leave a Ready task followed by still-Completed
+  // downstream tasks - an inconsistent chain. So we cascade: the target
+  // goes to Ready, and every task after it in the same chain that was
+  // already Completed/PendingVerification is reset to Pending. They
+  // re-activate to Ready naturally as the reopened work is completed
+  // again (via the normal onTaskCompleted -> activateNextTask flow).
+  // Requires a note - this is exactly the kind of correction that needs a
+  // paper trail. Same permission weight as reject (task:reject).
+  async reopen(id: string, userId: string, dto: TaskActionDto & { note: string }) {
+    if (!dto.note?.trim()) throw new BadRequestException('A note is required when reopening a task');
+
+    const task = await this.findOne(id);
+    if (task.status !== TaskStatus.Completed && task.status !== TaskStatus.PendingVerification) {
+      throw new ConflictException(`Only a completed task can be reopened - this task is ${task.status}`);
+    }
+
+    // Walk the nextTaskId chain forward from the target, collecting
+    // downstream tasks that need resetting. Bounded by the chain length,
+    // with a visited guard against any accidental cycle.
+    const downstream: string[] = [];
+    const visited = new Set<string>([id]);
+    let cursor: string | null = task.nextTaskId ?? null;
+    while (cursor && !visited.has(cursor)) {
+      visited.add(cursor);
+      const next = await this.prisma.productionTask.findUnique({
+        where: { id: cursor },
+        select: { id: true, status: true, nextTaskId: true },
+      });
+      if (!next) break;
+      // Only reset tasks that had progressed; leave anything still Pending
+      // (never started) exactly as it is.
+      if (next.status === TaskStatus.Completed || next.status === TaskStatus.PendingVerification || next.status === TaskStatus.InProgress || next.status === TaskStatus.Ready) {
+        downstream.push(next.id);
+      }
+      cursor = next.nextTaskId;
+    }
+
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const t = await tx.productionTask.update({
+        where: { id },
+        data: {
+          status: TaskStatus.Ready,
+          completedAt: null,
+          verifiedAt: null,
+          verifiedByUserId: null,
+          updatedByUserId: userId,
+        },
+        include: this.taskIncludes(),
+      });
+      await this.recordHistory(tx, id, task.status, TaskStatus.Ready, userId, dto.note);
+
+      for (const downId of downstream) {
+        const prev = await tx.productionTask.findUnique({ where: { id: downId }, select: { status: true } });
+        await tx.productionTask.update({
+          where: { id: downId },
+          data: {
+            status: TaskStatus.Pending,
+            completedAt: null,
+            verifiedAt: null,
+            verifiedByUserId: null,
+            startedAt: null,
+            updatedByUserId: userId,
+          },
+        });
+        if (prev) await this.recordHistory(tx, downId, prev.status, TaskStatus.Pending, userId, `Reset because upstream task "${updated.processDefinition.name}" was reopened`);
+      }
+
+      return t;
+    });
+
+    this.realtime.emitTaskStatusChanged(updated.departmentId, id, {
+      taskId: id,
+      fromStatus: task.status,
+      toStatus: TaskStatus.Ready,
+      task: updated as any,
+    });
+    for (const downId of downstream) {
+      const d = await this.prisma.productionTask.findUnique({ where: { id: downId }, include: this.taskIncludes() });
+      if (d) {
+        this.realtime.emitTaskStatusChanged(d.departmentId, downId, {
+          taskId: downId,
+          fromStatus: TaskStatus.Completed,
+          toStatus: TaskStatus.Pending,
+          task: d as any,
+        });
+      }
+    }
+
+    const unitId = updated.unitId ?? updated.part?.unitId;
+    if (unitId) {
+      await this.activityLog.log({
+        unitId,
+        userId,
+        action: ActivityAction.TaskReopened,
+        description: `${updated.processDefinition.name} reopened${updated.part ? ` on ${updated.part.partType?.name ?? updated.part.identifier}` : ''}${downstream.length ? ` (${downstream.length} downstream task(s) reset)` : ''} - ${dto.note}`,
+      });
+    }
+
+    // Reopened work drops the unit's progress and status back from
+    // Completed - recompute so dashboards and the status badge reflect
+    // that the unit is active again.
+    await this.recomputeAndEmit(updated);
+
+    return updated;
+  }
+
   async getHistory(id: string) {
     await this.findOne(id);
     return this.prisma.taskStatusHistory.findMany({

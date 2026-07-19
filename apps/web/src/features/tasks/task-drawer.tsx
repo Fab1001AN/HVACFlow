@@ -113,6 +113,18 @@ export function TaskDrawer({ taskId, onClose }: TaskDrawerProps) {
     onError: (err: any) => toast(err.message, 'error'),
   });
 
+  const reopenMutation = useMutation({
+    mutationFn: () => api.tasks.reopen(taskId!, note),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['task', taskId] });
+      queryClient.invalidateQueries({ queryKey: ['mission-control'] });
+      setNote('');
+      setShowNoteFor(null);
+      toast('Task reopened', 'info');
+    },
+    onError: (err: any) => toast(err.message, 'error'),
+  });
+
   const checklistMutation = useMutation({
     mutationFn: ({ responseId, isChecked }: { responseId: string; isChecked: boolean }) =>
       api.tasks.toggleChecklist(taskId!, responseId, isChecked),
@@ -403,6 +415,30 @@ export function TaskDrawer({ taskId, onClose }: TaskDrawerProps) {
                     onClick={() => { setShowNoteFor('reject'); setNote(''); }}
                   >
                     Reject
+                  </Button>
+                )
+              )}
+
+              {[TaskStatus.Completed, TaskStatus.PendingVerification].includes(task.status) && hasPermission('task:reject') && (
+                showNoteFor === 'reopen' ? (
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    className="flex-1"
+                    disabled={!note.trim()}
+                    loading={reopenMutation.isPending}
+                    onClick={() => reopenMutation.mutate()}
+                  >
+                    Confirm Reopen
+                  </Button>
+                ) : (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="flex-1"
+                    onClick={() => { setShowNoteFor('reopen'); setNote(''); }}
+                  >
+                    Reopen
                   </Button>
                 )
               )}

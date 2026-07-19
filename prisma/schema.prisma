@@ -395,6 +395,7 @@ enum ActivityAction {
   ManufacturingStarted
   AssemblyStarted
   TaskCompleted
+  TaskReopened
   DelayReported
   VendorPartReceived
   VendorPartLogged

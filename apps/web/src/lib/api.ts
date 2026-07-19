@@ -425,6 +425,7 @@ export const api = {
     hold: (id: string, note: string) => api.post<any>(`/production-tasks/${id}/hold`, { note }),
     resume: (id: string) => api.post<any>(`/production-tasks/${id}/resume`, {}),
     reject: (id: string, note: string) => api.post<any>(`/production-tasks/${id}/reject`, { note }),
+    reopen: (id: string, note: string) => api.post<any>(`/production-tasks/${id}/reopen`, { note }),
     getHistory: (id: string) => api.get<any[]>(`/production-tasks/${id}/history`),
     toggleChecklist: (id: string, responseId: string, isChecked: boolean) =>
       api.patch<any>(`/production-tasks/${id}/checklist/${responseId}`, { isChecked }),

@@ -118,6 +118,17 @@ export class ProductionTasksController {
     return this.service.reject(id, user.sub, dto);
   }
 
+  @Post(':id/reopen')
+  @RequirePermissions('task:reject')
+  @ApiOperation({ summary: 'Reopen a completed task and reset downstream tasks (note required)' })
+  reopen(
+    @Param('id') id: string,
+    @Body() dto: HoldRejectDto,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.service.reopen(id, user.sub, dto);
+  }
+
   @Get(':id/history')
   @RequirePermissions('task:view')
   getHistory(@Param('id') id: string) {
