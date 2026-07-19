@@ -130,24 +130,12 @@ export class UnitsService {
   }
 
   async directorSummary() {
-    // unit.status (Completed/Dispatched) is never actually written by the
-    // new workflow engine - marking a unit "Dispatched" via the Testing/
-    // Dispatch stages only ever updates currentWorkflowStageId, so the
-    // status filter below never excludes anything on its own. A unit
-    // that's fully shipped/dispatched would otherwise sit in the
-    // Director's "active" totals forever. Mirrors the same fix already
-    // applied to assemblySummary() - exclude by actual workflow position,
-    // not the legacy status field.
-    const TERMINAL_STAGE_NAMES = ['Dispatch'];
+    // Excludes units on a terminal stage via the admin-configurable
+    // isTerminal flag (see activeUnitsWhere) - a shipped/finished unit
+    // drops off the Director's active view without hardcoding which
+    // stage name counts as "done".
     const units = await this.prisma.unit.findMany({
-      where: {
-        deletedAt: null,
-        status: { notIn: ['Completed', 'Dispatched'] },
-        OR: [
-          { currentWorkflowStageId: null },
-          { currentWorkflowStage: { name: { notIn: TERMINAL_STAGE_NAMES } } },
-        ],
-      },
+      where: this.activeUnitsWhere(),
       include: { ...this.unitSummaryInclude(), currentWorkflowStage: { select: { name: true, sortOrder: true } } },
       orderBy: [{ isBlocked: 'desc' }, { dueDate: 'asc' }, { priorityPosition: 'asc' }],
     });
@@ -216,24 +204,29 @@ export class UnitsService {
   }
 
   async managerSummary() {
-    // Same staleness bug as directorSummary()/assemblySummary(): status
-    // notIn ['Completed','Dispatched'] never actually fires, since the
-    // workflow engine only writes currentWorkflowStageId. Without this,
-    // a unit that finished Assembly, passed Testing, and was Dispatched
-    // would sit in the "started" bucket below forever, since
-    // productionReleaseStatus is set once to Started and never changes
-    // again. Once a unit is past Assembly Started, the Manager's job on
-    // it is done - exclude it the same way assemblySummary() does.
-    const PAST_ASSEMBLY_STAGE_NAMES = ['Unit Completed', 'Testing', 'Dispatch'];
+    // The Production Manager's responsibility ends once a unit is past
+    // Assembly Started - after that it's QC/dispatch's problem, not a
+    // release-to-production concern. Previously this hardcoded the list
+    // of "past assembly" stage names, which breaks the moment a
+    // deployment renames or reorders stages. Instead we resolve the
+    // Assembly-boundary stage's sortOrder at query time and exclude
+    // anything at or beyond it (plus anything on a terminal stage).
+    // "Assembly Started" is still referenced by name here as the manager
+    // boundary, but only to look up its position - a renamed pipeline
+    // that keeps an equivalent boundary stage can point this at whatever
+    // it's called via a single constant.
+    const MANAGER_BOUNDARY_STAGE = 'Assembly Started';
+    const boundary = await this.prisma.workflowStage.findFirst({
+      where: { name: MANAGER_BOUNDARY_STAGE },
+      select: { sortOrder: true },
+    });
     const units = await this.prisma.unit.findMany({
-      where: {
-        deletedAt: null,
-        status: { notIn: ['Completed', 'Dispatched'] },
+      where: this.activeUnitsWhere({
         OR: [
           { currentWorkflowStageId: null },
-          { currentWorkflowStage: { name: { notIn: PAST_ASSEMBLY_STAGE_NAMES } } },
+          { currentWorkflowStage: { isTerminal: false, ...(boundary ? { sortOrder: { lte: boundary.sortOrder } } : {}) } },
         ],
-      },
+      }),
       include: {
         ...this.unitSummaryInclude(),
         currentWorkflowStage: { select: { name: true, sortOrder: true } },
@@ -298,7 +291,7 @@ export class UnitsService {
   }
 
   async engineeringQueue() {
-    return this.prisma.unit.findMany({ where: { deletedAt: null, status: { notIn: ['Completed', 'Dispatched'] } }, include: this.unitSummaryInclude(), orderBy: [{ productionMonth: 'asc' }, { priorityPosition: 'asc' }] });
+    return this.prisma.unit.findMany({ where: this.activeUnitsWhere(), include: this.unitSummaryInclude(), orderBy: [{ productionMonth: 'asc' }, { priorityPosition: 'asc' }] });
   }
 
   async findByOrder(orderId: string, page = 1, pageSize = 25) {
@@ -390,10 +383,7 @@ export class UnitsService {
   // than hiding not-yet-eligible units entirely.
   async plannerQueue() {
     return this.prisma.unit.findMany({
-      where: {
-        deletedAt: null,
-        status: { notIn: [UnitStatus.Completed, UnitStatus.Dispatched] },
-      },
+      where: this.activeUnitsWhere(),
       include: { ...this.unitSummaryInclude(), parts: { where: { deletedAt: null }, include: { partType: true } } },
       orderBy: [{ dueDate: 'asc' }, { priorityPosition: 'asc' }],
     });
@@ -412,35 +402,34 @@ export class UnitsService {
       vendorParts: { include: { partType: true } },
       currentWorkflowStage: { select: { name: true, sortOrder: true } },
     };
-    const baseWhere = { deletedAt: null, status: { notIn: [UnitStatus.Completed, UnitStatus.Dispatched] } };
 
     // assemblyStartedAt is set once, permanently, the moment Assembly
     // clicks "Start Building Unit" - it never gets cleared, so on its
     // own it can't tell "still being built" apart from "finished
     // Assembly ages ago and is now sitting in Testing or Dispatch".
-    // Without also checking the new workflow engine's actual current
-    // position, a unit that's fully progressed past Assembly would
-    // clutter this WIP list forever. unit.status (Completed/Dispatched)
-    // doesn't help here either - marking "Unit Completed" via the
-    // workflow engine only updates currentWorkflowStageId, it was never
-    // wired to touch unit.status at all.
-    const PAST_ASSEMBLY_STAGE_NAMES = ['Unit Completed', 'Testing', 'Dispatch'];
+    // We exclude units that have advanced past the Assembly boundary
+    // stage by resolving that stage's sortOrder at query time rather
+    // than hardcoding the downstream stage names - white-label safe.
+    const ASSEMBLY_BOUNDARY_STAGE = 'Assembly Started';
+    const boundary = await this.prisma.workflowStage.findFirst({
+      where: { name: ASSEMBLY_BOUNDARY_STAGE },
+      select: { sortOrder: true },
+    });
+    const notPastAssembly: Prisma.UnitWhereInput = {
+      OR: [
+        { currentWorkflowStageId: null },
+        { currentWorkflowStage: boundary ? { sortOrder: { lte: boundary.sortOrder } } : { isTerminal: false } },
+      ],
+    };
 
     const [wip, upcoming] = await Promise.all([
       this.prisma.unit.findMany({
-        where: {
-          ...baseWhere,
-          assemblyStartedAt: { not: null },
-          OR: [
-            { currentWorkflowStageId: null },
-            { currentWorkflowStage: { name: { notIn: PAST_ASSEMBLY_STAGE_NAMES } } },
-          ],
-        },
+        where: this.activeUnitsWhere({ assemblyStartedAt: { not: null }, ...notPastAssembly }),
         include,
         orderBy: [{ dueDate: 'asc' }],
       }),
       this.prisma.unit.findMany({
-        where: { ...baseWhere, assemblyStartedAt: null, productionReleaseStatus: ProductionReleaseStatus.Started },
+        where: this.activeUnitsWhere({ assemblyStartedAt: null, productionReleaseStatus: ProductionReleaseStatus.Started }),
         include,
         orderBy: [{ dueDate: 'asc' }],
       }),
@@ -581,6 +570,33 @@ export class UnitsService {
   async getAllTasks(unitId: string) { await this.findOne(unitId); return this.prisma.productionTask.findMany({ where: { OR: [{ unitId }, { part: { unitId } }] }, include: { processDefinition: { include: { department: true } }, department: true, priorityLevel: true, assignedUser: { select: { id: true, name: true, email: true } }, part: { include: { partType: true } } }, orderBy: [{ part: { identifier: 'asc' } }, { sequenceOrder: 'asc' }] }); }
 
   private unitSummaryInclude(): Prisma.UnitInclude { return { unitType: true, priorityLevel: true, currentDepartment: true, _count: { select: { parts: { where: { deletedAt: null } }, comments: true } } }; }
+
+  // "Active" = not soft-deleted and not parked on a stage an admin has
+  // flagged terminal. Excluding by the isTerminal flag rather than
+  // hardcoded stage names keeps this white-label-safe: a deployment can
+  // rename or restructure its end-of-line stages (Dispatch, Shipped,
+  // Installed, whatever) and this still works with no code change. Note
+  // we deliberately do NOT filter on unit.status here anymore - that
+  // field is derived from task completion and flips to Completed at
+  // assembly-done, long before the unit is actually finished shipping,
+  // so it's not a reliable "is this unit done" signal on its own.
+  private activeUnitsWhere(extra: Prisma.UnitWhereInput = {}): Prisma.UnitWhereInput {
+    // Composed with AND so a caller passing its own OR (or anything else)
+    // in `extra` can't accidentally clobber the terminal-stage guard -
+    // spreading extra at the top level previously would have.
+    return {
+      deletedAt: null,
+      AND: [
+        {
+          OR: [
+            { currentWorkflowStageId: null },
+            { currentWorkflowStage: { isTerminal: false } },
+          ],
+        },
+        extra,
+      ],
+    };
+  }
 
   async createPartWithTasks(tx: Prisma.TransactionClient, unitId: string, partTypeId: string, quantity: number, priorityLevelId: string, userId: string) {
     const routes = await tx.processRoute.findMany({ where: { partTypeId, isActive: true }, include: { processDefinition: true }, orderBy: { sequenceOrder: 'asc' } });

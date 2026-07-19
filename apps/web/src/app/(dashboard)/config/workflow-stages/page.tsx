@@ -5,11 +5,11 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { PageHeader, Button, Modal, Input, Select, EmptyState, Spinner, Card, Badge } from '@/components/shared';
 import { ImpactWarningModal } from '@/components/shared/impact-warning-modal';
-import { Plus, GripVertical, Pencil, Trash2, Workflow, Power, ArrowLeftRight } from 'lucide-react';
+import { Plus, GripVertical, Pencil, Trash2, Workflow, Power, ArrowLeftRight, Flag } from 'lucide-react';
 import { toast } from '@/components/shared';
 import { cn } from '@/lib/utils';
 
-const EMPTY_FORM = { name: '', departmentId: '', requiredPermission: '', actionLabel: 'Advance', allowsBackward: false };
+const EMPTY_FORM = { name: '', departmentId: '', requiredPermission: '', actionLabel: 'Advance', allowsBackward: false, isTerminal: false };
 
 export default function WorkflowStagesConfigPage() {
   const queryClient = useQueryClient();
@@ -86,6 +86,7 @@ export default function WorkflowStagesConfigPage() {
       requiredPermission: stage.requiredPermission,
       actionLabel: stage.actionLabel,
       allowsBackward: stage.allowsBackward,
+      isTerminal: stage.isTerminal ?? false,
     });
     setModalOpen(true);
   };
@@ -190,6 +191,7 @@ export default function WorkflowStagesConfigPage() {
                     <div className="flex items-center gap-2">
                       <p className="text-sm font-medium text-foreground">{stage.name}</p>
                       {stage.allowsBackward && <Badge variant="outline"><ArrowLeftRight className="w-3 h-3" /> Reversible</Badge>}
+                      {stage.isTerminal && <Badge variant="outline"><Flag className="w-3 h-3" /> Terminal</Badge>}
                     </div>
                     <p className="text-xs text-muted-foreground">
                       {stage.department?.name ?? 'Not department-specific'} · needs <span className="font-mono">{stage.requiredPermission}</span> · button says &ldquo;{stage.actionLabel}&rdquo;
@@ -256,6 +258,13 @@ export default function WorkflowStagesConfigPage() {
           <label className="flex items-center gap-2 cursor-pointer">
             <input type="checkbox" checked={form.allowsBackward} onChange={(e) => setForm((f) => ({ ...f, allowsBackward: e.target.checked }))} className="rounded border-border" />
             <span className="text-sm text-foreground">Allow sending a unit back to the previous stage from here</span>
+          </label>
+          <label className="flex items-start gap-2 cursor-pointer">
+            <input type="checkbox" checked={form.isTerminal} onChange={(e) => setForm((f) => ({ ...f, isTerminal: e.target.checked }))} className="mt-0.5 rounded border-border" />
+            <span className="text-sm text-foreground">
+              Terminal stage (end of the line)
+              <span className="block text-xs text-muted-foreground">A unit on a terminal stage is treated as finished — it drops off the active Director, Manager, Planner and Designing work lists.</span>
+            </span>
           </label>
         </div>
       </Modal>

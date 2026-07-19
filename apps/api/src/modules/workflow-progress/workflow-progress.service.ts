@@ -183,8 +183,17 @@ export class WorkflowProgressService {
 
   private deriveUnitStatus(allStatuses: string[], progress: number): UnitStatus {
     if (allStatuses.length === 0) return UnitStatus.Planned;
+    // All shop-floor tasks/parts done = production Completed. It does NOT
+    // mean the unit is Dispatched - dispatch/shipping is a later,
+    // workflow-engine-owned step (Testing -> Dispatch -> Shipped) that
+    // happens well after the last assembly task is checked off. Deriving
+    // Dispatched here caused a unit still sitting in Testing to be marked
+    // Dispatched the moment assembly finished, which then dropped it from
+    // every active dashboard (they exclude Dispatched units) before it
+    // was actually tested or shipped. Terminal status now comes only from
+    // the workflow engine reaching a stage flagged isTerminal.
     if (allStatuses.every((s) => s === TaskStatus.Completed || s === PartStatus.Completed)) {
-      return UnitStatus.Dispatched; // All done including dispatch
+      return UnitStatus.Completed;
     }
     if (progress === 100) return UnitStatus.Completed;
     if (allStatuses.some((s) => s === TaskStatus.OnHold || s === PartStatus.OnHold)) return UnitStatus.OnHold;

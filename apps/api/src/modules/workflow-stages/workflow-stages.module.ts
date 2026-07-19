@@ -22,6 +22,7 @@ class CreateWorkflowStageDto {
   @IsString() @MaxLength(100) requiredPermission: string;
   @IsOptional() @IsString() @MaxLength(50) actionLabel?: string;
   @IsOptional() @IsBoolean() allowsBackward?: boolean;
+  @IsOptional() @IsBoolean() isTerminal?: boolean;
 }
 
 class UpdateWorkflowStageDto extends PartialType(CreateWorkflowStageDto) {

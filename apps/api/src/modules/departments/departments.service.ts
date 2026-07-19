@@ -27,7 +27,18 @@ export class DepartmentsService {
       },
     });
     const unitsCurrentlyHere = await this.prisma.unit.count({
-      where: { currentDepartmentId: id, deletedAt: null, status: { notIn: ['Completed', 'Dispatched'] } },
+      where: {
+        currentDepartmentId: id,
+        deletedAt: null,
+        // Exclude units already on a terminal workflow stage - they're
+        // done and shouldn't count toward "units affected if you change
+        // this department". Uses the admin-configurable isTerminal flag,
+        // not a hardcoded status/stage name.
+        OR: [
+          { currentWorkflowStageId: null },
+          { currentWorkflowStage: { isTerminal: false } },
+        ],
+      },
     });
     return { activeTaskCount: activeTasks, unitsCurrentlyHere };
   }

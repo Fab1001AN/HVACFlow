@@ -590,6 +590,14 @@ model WorkflowStage {
   requiredPermission String  // permission code needed to advance a unit out of this stage
   actionLabel        String  @default("Advance") // button text shown for the advance action
   allowsBackward     Boolean @default(false) // can a unit be sent back to the previous stage from here
+  // A unit on a terminal stage is finished as far as active production
+  // dashboards care - it drops off the Director/Manager/Planner/
+  // Designing work lists. Which stages count as terminal is
+  // deployment-configurable rather than hardcoded by name, so a
+  // white-label customer can define their own end-of-line (e.g. one
+  // shop's "done" is Dispatch, another's is a later Shipped or Installed
+  // stage) without touching code.
+  isTerminal         Boolean @default(false)
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
 

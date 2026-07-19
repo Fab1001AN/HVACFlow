@@ -706,12 +706,12 @@ async function main() {
     // since reaching this stage is an automatic consequence of logging a
     // shipment (ShipmentService.create()), not a separate manual action -
     // whoever can log the shipment can trigger the advance.
-    { name: 'Shipped', sortOrder: 9, departmentId: null, requiredPermission: 'shipment:manage', actionLabel: 'Mark Shipped', allowsBackward: false },
+    { name: 'Shipped', sortOrder: 9, departmentId: null, requiredPermission: 'shipment:manage', actionLabel: 'Mark Shipped', allowsBackward: false, isTerminal: true },
   ];
   for (const stage of workflowStageData) {
     await prisma.workflowStage.upsert({
       where: { name: stage.name },
-      update: { sortOrder: stage.sortOrder, departmentId: stage.departmentId, requiredPermission: stage.requiredPermission, actionLabel: stage.actionLabel },
+      update: { sortOrder: stage.sortOrder, departmentId: stage.departmentId, requiredPermission: stage.requiredPermission, actionLabel: stage.actionLabel, isTerminal: (stage as any).isTerminal ?? false },
       create: stage,
     });
   }
