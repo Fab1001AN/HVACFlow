@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, ConflictException } from '@nestjs/common';
 import { Controller, Get, Post, Patch, Delete, Body, Param, Query, Module } from '@nestjs/common';
 import { IsString, IsOptional, IsObject, MaxLength } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
@@ -76,6 +76,18 @@ export class CustomersService {
 
   async remove(id: string) {
     await this.findOne(id);
+    // Block deletion while the customer still has live projects. Without
+    // this, soft-deleting a customer orphaned its projects/orders/units -
+    // they stayed active on dashboards and the shop floor with a parent
+    // that no longer exists. Same guard philosophy as order.remove()
+    // (Draft-only): clean up top-down. A user who wants everything gone
+    // cancels/deletes the projects first.
+    const liveProjects = await this.prisma.project.count({ where: { customerId: id, deletedAt: null } });
+    if (liveProjects > 0) {
+      throw new ConflictException(
+        `Cannot delete this customer - it still has ${liveProjects} active project(s). Delete or move them first.`,
+      );
+    }
     return this.prisma.customer.update({ where: { id }, data: { deletedAt: new Date() } });
   }
 }
