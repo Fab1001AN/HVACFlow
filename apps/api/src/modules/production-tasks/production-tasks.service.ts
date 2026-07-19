@@ -444,6 +444,13 @@ export class ProductionTasksService {
         if (prev) await this.recordHistory(tx, downId, prev.status, TaskStatus.Pending, userId, `Reset because upstream task "${updated.processDefinition.name}" was reopened`);
       }
 
+      // Clear the checklist for the reopened task and every task reset
+      // downstream, inside the same transaction. Without this, a reopened
+      // task keeps last time's checkmarks, so its quality checklist would
+      // read as already-passed and could be re-completed with no genuine
+      // re-verification - defeating the checklist's purpose.
+      await this.checklists.resetForTasks([id, ...downstream], tx);
+
       return t;
     });
 

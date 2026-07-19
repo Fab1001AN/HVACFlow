@@ -1,5 +1,6 @@
 import { Injectable, NotFoundException, ConflictException, UnprocessableEntityException } from '@nestjs/common';
 import { PrismaService } from '../../common/prisma/prisma.service';
+import { Prisma } from '@prisma/client';
 import { IsBoolean, IsInt, IsOptional, IsString, IsUUID, Min, MaxLength } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
@@ -139,6 +140,23 @@ export class ChecklistsService {
       where: { productionTaskId: taskId },
       include: { checklistItemTemplate: true },
       orderBy: { checklistItemTemplate: { sortOrder: 'asc' } },
+    });
+  }
+
+  /**
+   * Uncheck every checklist response for the given tasks - used when a task
+   * is reopened so its quality checklist must be re-verified from scratch,
+   * rather than carrying over the checkmarks from the previous completion
+   * (which would let the task be re-completed without actually re-checking).
+   * Accepts an optional transaction client so it can run inside the caller's
+   * atomic transaction (e.g. task reopen).
+   */
+  async resetForTasks(taskIds: string[], tx?: Prisma.TransactionClient) {
+    if (taskIds.length === 0) return;
+    const client = tx ?? this.prisma;
+    await client.checklistResponse.updateMany({
+      where: { productionTaskId: { in: taskIds } },
+      data: { isChecked: false, completedByUserId: null, completedAt: null },
     });
   }
 
