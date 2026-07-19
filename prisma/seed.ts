@@ -233,6 +233,25 @@ async function main() {
     })),
   });
 
+  // ─── Configurable defaults: seed ONCE, then the customer owns them ──────────
+  // Everything from here down to the Admin User section is default business
+  // configuration (priority levels, departments, processes, unit/part types,
+  // routes, checklists, workflow stages). On a fresh install we populate
+  // sensible defaults; on every subsequent boot we leave it all untouched so
+  // a customer's own edits, renames and deletions are never clobbered or
+  // resurrected by a re-seed. (Each deployment is a separate company's own
+  // instance, so "their configuration" is the whole point.) New defaults for
+  // an already-live customer ship as migrations, not via re-seeding.
+  // Permissions, roles, role-permissions and the admin user above/below this
+  // block are always re-ensured every boot - losing those would lock the
+  // customer out, so they are intentionally NOT gated.
+  const existingDepartmentCount = await prisma.department.count();
+  const isFreshInstance = existingDepartmentCount === 0;
+  if (!isFreshInstance) {
+    console.log('Existing configuration detected — skipping default business-data seed (customer-owned).');
+  }
+
+  if (isFreshInstance) {
   // ─── Priority Levels ────────────────────────────────────────────────────────
   console.log('Creating priority levels...');
 
@@ -604,6 +623,7 @@ async function main() {
       },
     },
   }).catch(() => null);
+  } // end if (isFreshInstance) — configurable defaults block
 
   // ─── Admin User ─────────────────────────────────────────────────────────────
   console.log('Creating default admin user...');
@@ -672,6 +692,7 @@ async function main() {
     },
   });
 
+  if (isFreshInstance) {
   // ─── Workflow Stages (Step 3a: shadow mode) ────────────────────────────────
   // These 5 stages mirror the 5 EXISTING pipeline functions
   // (advanceEngineering/markPlanned/releaseToProduction/
@@ -684,12 +705,18 @@ async function main() {
   // mirror, so they can't be shadow-written the same way; they'll be
   // added properly once the real cutover happens.
   console.log('Seeding workflow stages (shadow mode)...');
+  // Look up department IDs directly rather than relying on the departments
+  // map (scoped to the priority/department seed block above) - keeps this
+  // block self-contained and independently guardable.
+  const deptRows = await prisma.department.findMany({ select: { id: true, code: true } });
+  const deptByCode: Record<string, string> = {};
+  for (const d of deptRows) deptByCode[d.code] = d.id;
   const workflowStageData = [
-    { name: 'Detailing', sortOrder: 1, departmentId: departments['ENG'], requiredPermission: 'unit:manage', actionLabel: 'Advance Detailing' },
+    { name: 'Detailing', sortOrder: 1, departmentId: deptByCode['ENG'], requiredPermission: 'unit:manage', actionLabel: 'Advance Detailing' },
     { name: 'Planning', sortOrder: 2, departmentId: null, requiredPermission: 'unit:plan', actionLabel: 'Release to Production Manager' },
     { name: 'Manager Release', sortOrder: 3, departmentId: null, requiredPermission: 'unit:manage', actionLabel: 'Release to Fabrication' },
-    { name: 'Fabrication Started', sortOrder: 4, departmentId: departments['FAB'], requiredPermission: 'task:start', actionLabel: 'Start Entire Unit' },
-    { name: 'Assembly Started', sortOrder: 5, departmentId: departments['ASSY'], requiredPermission: 'task:start', actionLabel: 'Start Building Unit', isManagerBoundary: true },
+    { name: 'Fabrication Started', sortOrder: 4, departmentId: deptByCode['FAB'], requiredPermission: 'task:start', actionLabel: 'Start Entire Unit' },
+    { name: 'Assembly Started', sortOrder: 5, departmentId: deptByCode['ASSY'], requiredPermission: 'task:start', actionLabel: 'Start Building Unit', isManagerBoundary: true },
     // These three are genuinely new stages, not shadow-written from any
     // existing function - a unit only ever reaches them by being
     // advanced through the workflow engine directly, starting from
@@ -697,9 +724,9 @@ async function main() {
     // flag: advance() blocks entry here while any part is unfinished. The
     // flag (not the stage name) drives that rule now, so a deployment can
     // move the quality gate elsewhere.
-    { name: 'Unit Completed', sortOrder: 6, departmentId: departments['ASSY'], requiredPermission: 'task:start', actionLabel: 'Mark Unit Completed', allowsBackward: true, gatesOnPartsComplete: true },
-    { name: 'Testing', sortOrder: 7, departmentId: departments['QA'], requiredPermission: 'qc:manage', actionLabel: 'Unit Tested', allowsBackward: true },
-    { name: 'Dispatch', sortOrder: 8, departmentId: departments['LOG'], requiredPermission: 'shipment:manage', actionLabel: 'Dispatched' },
+    { name: 'Unit Completed', sortOrder: 6, departmentId: deptByCode['ASSY'], requiredPermission: 'task:start', actionLabel: 'Mark Unit Completed', allowsBackward: true, gatesOnPartsComplete: true },
+    { name: 'Testing', sortOrder: 7, departmentId: deptByCode['QA'], requiredPermission: 'qc:manage', actionLabel: 'Unit Tested', allowsBackward: true },
+    { name: 'Dispatch', sortOrder: 8, departmentId: deptByCode['LOG'], requiredPermission: 'shipment:manage', actionLabel: 'Dispatched' },
     // Genuine terminal stage. Dispatch used to be the last stage, which
     // meant a shipped unit had nowhere to advance into and sat on the
     // Dispatch "Ready to Ship" list forever. Same permission as Dispatch
@@ -715,6 +742,7 @@ async function main() {
       create: stage,
     });
   }
+  } // end if (isFreshInstance) — workflow stages
 
   console.log('\n✅ Seed complete!');
   console.log('   Admin login: admin@hvacflow.com / Admin@HVACFlow1');
