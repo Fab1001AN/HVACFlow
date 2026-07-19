@@ -165,6 +165,10 @@ export class PartsService {
         previousTaskId=task.id;
       }
     });
+    // The route change added/removed tasks, so the unit's total work (and
+    // thus its progress % / derived status) changed - recompute, same as
+    // create()/remove() do.
+    if (part.unitId) await this.workflowProgress.recomputeUnit(part.unitId);
     return this.findOne(id);
   }
 
@@ -176,7 +180,13 @@ export class PartsService {
     if (inProgressCount > 0) {
       throw new ConflictException('Cannot delete part with completed or in-progress tasks');
     }
-    return this.prisma.part.update({ where: { id }, data: { deletedAt: new Date() } });
+    const removed = await this.prisma.part.update({ where: { id }, data: { deletedAt: new Date() } });
+    // Removing a part changes the unit's total work, so its progress % and
+    // derived status are now stale. Recompute, same as create() does - without
+    // this a near-complete unit could keep showing an outdated progress figure
+    // indefinitely, since nothing else on it would trigger a recompute.
+    if (part.unitId) await this.workflowProgress.recomputeUnit(part.unitId);
+    return removed;
   }
 }
 
