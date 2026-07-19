@@ -32,6 +32,7 @@ export const UnitStatus = {
   Completed: 'Completed',
   OnHold: 'OnHold',
   Dispatched: 'Dispatched',
+  Cancelled: 'Cancelled',
 } as const;
 
 export type UnitStatus = typeof UnitStatus[keyof typeof UnitStatus];

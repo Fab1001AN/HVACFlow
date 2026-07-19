@@ -3,7 +3,7 @@ import { Controller, Get, Post, Patch, Delete, Body, Param, Query, Module } from
 import { IsString, IsOptional, IsDateString, IsUUID, IsEnum } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
-import { OrderStatus } from '@hvacflow/shared-types';
+import { OrderStatus, UnitStatus } from '@hvacflow/shared-types';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
 import { PaginationQueryDto, paginate, paginationArgs } from '../../common/dto/pagination.dto';
@@ -108,6 +108,25 @@ export class OrdersService {
           'Cannot cancel order with tasks currently in progress',
         );
       }
+
+      // Cascade the cancellation to the order's units atomically. Without
+      // this, cancelling an order left its units untouched - they kept
+      // showing as active production work on every dashboard and queue,
+      // as if the order were never cancelled. We only touch units that
+      // aren't already finished (Completed/Dispatched) - a unit that
+      // genuinely shipped before the order was cancelled keeps its real
+      // status. Cancelled units drop off active views via activeUnitsWhere.
+      return this.prisma.$transaction(async (tx) => {
+        await tx.unit.updateMany({
+          where: { orderId: id, deletedAt: null, status: { notIn: [UnitStatus.Completed, UnitStatus.Dispatched, UnitStatus.Cancelled] } },
+          data: { status: UnitStatus.Cancelled },
+        });
+        return tx.order.update({
+          where: { id },
+          data: { status: newStatus },
+          include: { priorityLevel: true },
+        });
+      });
     }
 
     return this.prisma.order.update({

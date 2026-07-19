@@ -57,6 +57,7 @@ enum UnitStatus {
   Completed
   OnHold
   Dispatched
+  Cancelled
 }
 
 enum PartStatus {

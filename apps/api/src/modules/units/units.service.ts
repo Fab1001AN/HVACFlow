@@ -572,6 +572,10 @@ export class UnitsService {
     // spreading extra at the top level previously would have.
     return {
       deletedAt: null,
+      // A cancelled unit (its order was cancelled) is not active work -
+      // exclude it here so every dashboard/queue that goes through this
+      // helper drops it at once, no per-query filter to forget.
+      status: { not: UnitStatus.Cancelled },
       AND: [
         {
           OR: [

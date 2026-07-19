@@ -3,7 +3,7 @@ import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
-import { JwtPayload, TaskStatus } from '@hvacflow/shared-types';
+import { JwtPayload, TaskStatus, UnitStatus } from '@hvacflow/shared-types';
 import { EngineeringStatus } from '@prisma/client';
 
 // Engineering/Detailing's progress (Submittal Received, Design
@@ -121,6 +121,16 @@ export class MissionControlService {
         const where: any = {
           departmentId: dept.id,
           status: { in: activeStatuses },
+          // Don't surface tasks whose unit was cancelled (its order was
+          // cancelled). A task links to its unit either directly (unitId)
+          // or through its part (part.unit) - exclude cancelled via both
+          // paths so cancelled work leaves the shop floor.
+          NOT: {
+            OR: [
+              { unit: { status: UnitStatus.Cancelled } },
+              { part: { unit: { status: UnitStatus.Cancelled } } },
+            ],
+          },
           ...(filters.priorityLevelId ? { priorityLevelId: filters.priorityLevelId } : {}),
           ...(filters.processDefinitionId ? { processDefinitionId: filters.processDefinitionId } : {}),
           ...(filters.mine && filters.userId ? { assignedUserId: filters.userId } : {}),

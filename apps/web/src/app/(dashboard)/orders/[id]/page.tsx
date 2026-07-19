@@ -19,6 +19,7 @@ export default function OrderDetailPage() {
   const queryClient = useQueryClient();
   const { hasPermission } = useAuthStore();
   const [modalOpen, setModalOpen] = useState(false);
+  const [cancelConfirmOpen, setCancelConfirmOpen] = useState(false);
   const [form, setForm] = useState({ unitTypeId: '', serialNumber: '', specifications: {} as Record<string, unknown> });
   const [optionalParts, setOptionalParts] = useState<any[]>([]);
   const [selectedOptional, setSelectedOptional] = useState<string[]>([]);
@@ -57,7 +58,7 @@ export default function OrderDetailPage() {
 
   const cancelMutation = useMutation({
     mutationFn: () => api.orders.cancel(id),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['order', id] }); toast('Order cancelled', 'info'); },
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['order', id] }); setCancelConfirmOpen(false); toast('Order cancelled', 'info'); },
     onError: (err: any) => toast(err.message, 'error'),
   });
 
@@ -84,7 +85,7 @@ export default function OrderDetailPage() {
               </Button>
             )}
             {[OrderStatus.Draft, OrderStatus.Confirmed].includes(order.status) && hasPermission('order:manage') && (
-              <Button variant="outline" className="text-destructive border-destructive/30 hover:border-destructive/60" loading={cancelMutation.isPending} onClick={() => cancelMutation.mutate()}>
+              <Button variant="outline" className="text-destructive border-destructive/30 hover:border-destructive/60" onClick={() => setCancelConfirmOpen(true)}>
                 Cancel Order
               </Button>
             )}
@@ -180,6 +181,35 @@ export default function OrderDetailPage() {
             placeholder="Select type"
           />
           <Input label="Serial Number" value={form.serialNumber} onChange={(e) => setForm((f) => ({ ...f, serialNumber: e.target.value }))} placeholder="HU-2201" />
+        </div>
+      </Modal>
+
+      <Modal open={cancelConfirmOpen} onClose={() => setCancelConfirmOpen(false)} title="Cancel this order?"
+        footer={
+          <div className="flex justify-end gap-2">
+            <Button variant="secondary" onClick={() => setCancelConfirmOpen(false)}>Keep Order</Button>
+            <Button variant="destructive" loading={cancelMutation.isPending} onClick={() => cancelMutation.mutate()}>
+              Cancel Order
+            </Button>
+          </div>
+        }
+      >
+        <div className="space-y-2 text-sm text-foreground">
+          {(() => {
+            const affected = (order.units ?? []).filter((u: any) => !['Completed', 'Dispatched', 'Cancelled'].includes(u.status));
+            return (
+              <>
+                <p>This will cancel order <span className="font-medium">{order.orderNumber}</span>.</p>
+                {affected.length > 0 ? (
+                  <p className="text-muted-foreground">
+                    {affected.length} unit{affected.length === 1 ? '' : 's'} still in production will also be cancelled and removed from all active dashboards and shop-floor queues. Units already completed or dispatched are unaffected. This can't be undone.
+                  </p>
+                ) : (
+                  <p className="text-muted-foreground">No in-production units will be affected. This can't be undone.</p>
+                )}
+              </>
+            );
+          })()}
         </div>
       </Modal>
     </div>

@@ -53,6 +53,7 @@ export const UNIT_STATUS_BG: Record<UnitStatus, string> = {
   [UnitStatus.Completed]: 'bg-green-500/10 text-green-400',
   [UnitStatus.OnHold]: 'bg-orange-500/10 text-orange-400',
   [UnitStatus.Dispatched]: 'bg-blue-500/10 text-blue-400',
+  [UnitStatus.Cancelled]: 'bg-red-500/10 text-red-400',
 };
 
 // ─── Date/time helpers ────────────────────────────────────────────────────────
