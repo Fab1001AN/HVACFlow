@@ -55,7 +55,7 @@ export class ShipmentService {
   async create(unitId: string, dto: CreateShipmentDto, user: JwtPayload) {
     const unit = await this.prisma.unit.findUnique({
       where: { id: unitId, deletedAt: null },
-      include: { currentWorkflowStage: { select: { name: true } } },
+      select: { id: true },
     });
     if (!unit) throw new NotFoundException('Unit not found');
 
@@ -81,21 +81,21 @@ export class ShipmentService {
       description: `Shipment logged${dto.carrierName ? ` - ${dto.carrierName}` : ''}${dto.truckNumber ? `, truck ${dto.truckNumber}` : ''}`,
     });
 
-    // Only auto-advance if the unit is actually sitting on Dispatch right
-    // now - logging a shipment record isn't necessarily the trigger for
-    // every unit (e.g. a correction/backfill), so this deliberately
-    // doesn't blindly call advance() regardless of position. Wrapped in
-    // try/catch and never rethrown - same defensive philosophy as
-    // shadowSetStage() elsewhere in this codebase: a failure to advance
-    // the workflow stage must never block the shipment record itself
-    // from being saved.
-    if (unit.currentWorkflowStage?.name === 'Dispatch') {
-      try {
+    // Auto-advance into the terminal stage when a shipment is logged for a
+    // unit sitting immediately before it (e.g. Dispatch -> Shipped). Decided
+    // by position (is the next stage terminal?) rather than a hardcoded
+    // "Dispatch" stage name, so a renamed pipeline still works. A shipment
+    // logged for a unit anywhere else (a correction/backfill) doesn't move
+    // it. Wrapped in try/catch and never rethrown - same defensive
+    // philosophy as shadowSetStage(): a failed advance must never block the
+    // shipment record itself from being saved.
+    try {
+      if (await this.workflowStages.nextStageIsTerminal(unitId)) {
         await this.workflowStages.advance(unitId, user);
-      } catch (err) {
-        // eslint-disable-next-line no-console
-        console.error(`Failed to auto-advance unit ${unitId} to Shipped after logging shipment:`, err);
       }
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error(`Failed to auto-advance unit ${unitId} to its terminal stage after logging shipment:`, err);
     }
 
     return shipment;

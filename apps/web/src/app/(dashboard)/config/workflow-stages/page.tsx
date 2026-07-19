@@ -9,7 +9,7 @@ import { Plus, GripVertical, Pencil, Trash2, Workflow, Power, ArrowLeftRight, Fl
 import { toast } from '@/components/shared';
 import { cn } from '@/lib/utils';
 
-const EMPTY_FORM = { name: '', departmentId: '', requiredPermission: '', actionLabel: 'Advance', allowsBackward: false, isTerminal: false };
+const EMPTY_FORM = { name: '', departmentId: '', requiredPermission: '', actionLabel: 'Advance', allowsBackward: false, isTerminal: false, gatesOnPartsComplete: false, isManagerBoundary: false };
 
 export default function WorkflowStagesConfigPage() {
   const queryClient = useQueryClient();
@@ -87,6 +87,8 @@ export default function WorkflowStagesConfigPage() {
       actionLabel: stage.actionLabel,
       allowsBackward: stage.allowsBackward,
       isTerminal: stage.isTerminal ?? false,
+      gatesOnPartsComplete: stage.gatesOnPartsComplete ?? false,
+      isManagerBoundary: stage.isManagerBoundary ?? false,
     });
     setModalOpen(true);
   };
@@ -192,6 +194,8 @@ export default function WorkflowStagesConfigPage() {
                       <p className="text-sm font-medium text-foreground">{stage.name}</p>
                       {stage.allowsBackward && <Badge variant="outline"><ArrowLeftRight className="w-3 h-3" /> Reversible</Badge>}
                       {stage.isTerminal && <Badge variant="outline"><Flag className="w-3 h-3" /> Terminal</Badge>}
+                      {stage.isManagerBoundary && <Badge variant="outline"><Flag className="w-3 h-3" /> Manager boundary</Badge>}
+                      {stage.gatesOnPartsComplete && <Badge variant="outline"><Flag className="w-3 h-3" /> Parts gate</Badge>}
                     </div>
                     <p className="text-xs text-muted-foreground">
                       {stage.department?.name ?? 'Not department-specific'} · needs <span className="font-mono">{stage.requiredPermission}</span> · button says &ldquo;{stage.actionLabel}&rdquo;
@@ -264,6 +268,20 @@ export default function WorkflowStagesConfigPage() {
             <span className="text-sm text-foreground">
               Terminal stage (end of the line)
               <span className="block text-xs text-muted-foreground">A unit on a terminal stage is treated as finished — it drops off the active Director, Manager, Planner and Designing work lists.</span>
+            </span>
+          </label>
+          <label className="flex items-start gap-2 cursor-pointer">
+            <input type="checkbox" checked={form.isManagerBoundary} onChange={(e) => setForm((f) => ({ ...f, isManagerBoundary: e.target.checked }))} className="mt-0.5 rounded border-border" />
+            <span className="text-sm text-foreground">
+              Manager / Assembly boundary
+              <span className="block text-xs text-muted-foreground">Marks where the Production Manager's and Assembly's job ends. Units past this stage leave those two WIP views. Set this on one stage only.</span>
+            </span>
+          </label>
+          <label className="flex items-start gap-2 cursor-pointer">
+            <input type="checkbox" checked={form.gatesOnPartsComplete} onChange={(e) => setForm((f) => ({ ...f, gatesOnPartsComplete: e.target.checked }))} className="mt-0.5 rounded border-border" />
+            <span className="text-sm text-foreground">
+              Require all parts complete to enter
+              <span className="block text-xs text-muted-foreground">A unit can't be advanced into this stage while any of its parts still have unfinished work.</span>
             </span>
           </label>
         </div>

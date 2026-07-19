@@ -23,6 +23,8 @@ class CreateWorkflowStageDto {
   @IsOptional() @IsString() @MaxLength(50) actionLabel?: string;
   @IsOptional() @IsBoolean() allowsBackward?: boolean;
   @IsOptional() @IsBoolean() isTerminal?: boolean;
+  @IsOptional() @IsBoolean() gatesOnPartsComplete?: boolean;
+  @IsOptional() @IsBoolean() isManagerBoundary?: boolean;
 }
 
 class UpdateWorkflowStageDto extends PartialType(CreateWorkflowStageDto) {
@@ -144,6 +146,24 @@ export class WorkflowStagesService {
     return this.prisma.workflowStage.findMany({ orderBy: { sortOrder: 'asc' } });
   }
 
+  // Would advancing this unit land it on a terminal stage? Uses the same
+  // "next active stage after current" logic as advance(), so ShipmentService
+  // can decide whether logging a shipment should auto-advance the unit into
+  // its terminal (e.g. Shipped) stage - by position, not by matching a
+  // hardcoded "Dispatch" stage name. Returns false if the unit has no stage,
+  // is already terminal, or has no active stage ahead of it.
+  async nextStageIsTerminal(unitId: string): Promise<boolean> {
+    const unit = await this.prisma.unit.findUnique({ where: { id: unitId }, select: { currentWorkflowStageId: true } });
+    if (!unit?.currentWorkflowStageId) return false;
+    const allStages = await this.allStagesOrdered();
+    const currentIndex = allStages.findIndex((s) => s.id === unit.currentWorkflowStageId);
+    if (currentIndex < 0) return false;
+    for (let i = currentIndex + 1; i < allStages.length; i++) {
+      if (allStages[i].isActive) return allStages[i].isTerminal;
+    }
+    return false;
+  }
+
   async advance(unitId: string, user: JwtPayload) {
     const unit = await this.prisma.unit.findUnique({ where: { id: unitId, deletedAt: null } });
     if (!unit) throw new NotFoundException('Unit not found');
@@ -171,14 +191,12 @@ export class WorkflowStagesService {
     if (!nextStage) throw new ConflictException('Already at the final stage');
     this.assertPermission(user, nextStage.requiredPermission);
 
-    // Assembly declaring a unit "Completed" is the one transition in
-    // this engine with a real business rule behind it, not just a
-    // permission check - explicitly required: a unit can't be marked
-    // complete while any of its parts still have unfinished work.
-    // Matched by stage name since there's no generic per-stage
-    // validation hook system (a deliberately narrower fix than building
-    // that, for this one rule that actually needs enforcing).
-    if (nextStage.name === 'Unit Completed') {
+    // The parts-completion quality gate: a unit can't advance INTO a stage
+    // flagged gatesOnPartsComplete while any of its parts still have
+    // unfinished work. Flag-driven rather than matched to a hardcoded stage
+    // name, so a deployment can position this gate wherever its pipeline
+    // needs it (or nowhere) via the Workflow Stages config.
+    if (nextStage.gatesOnPartsComplete) {
       const parts = await this.prisma.part.findMany({ where: { unitId, deletedAt: null }, select: { status: true, partType: { select: { name: true } } } });
       const unfinished = parts.filter((p) => p.status !== 'Completed');
       if (unfinished.length > 0) {

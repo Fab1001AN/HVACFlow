@@ -689,15 +689,15 @@ async function main() {
     { name: 'Planning', sortOrder: 2, departmentId: null, requiredPermission: 'unit:plan', actionLabel: 'Release to Production Manager' },
     { name: 'Manager Release', sortOrder: 3, departmentId: null, requiredPermission: 'unit:manage', actionLabel: 'Release to Fabrication' },
     { name: 'Fabrication Started', sortOrder: 4, departmentId: departments['FAB'], requiredPermission: 'task:start', actionLabel: 'Start Entire Unit' },
-    { name: 'Assembly Started', sortOrder: 5, departmentId: departments['ASSY'], requiredPermission: 'task:start', actionLabel: 'Start Building Unit' },
+    { name: 'Assembly Started', sortOrder: 5, departmentId: departments['ASSY'], requiredPermission: 'task:start', actionLabel: 'Start Building Unit', isManagerBoundary: true },
     // These three are genuinely new stages, not shadow-written from any
     // existing function - a unit only ever reaches them by being
     // advanced through the workflow engine directly, starting from
-    // Assembly Started. "Unit Completed" specifically is guarded in
-    // code (advance() in units.service.ts) against advancing here if
-    // any of the unit's parts aren't fully done - the seed only sets up
-    // the stage and its permission, not that business rule.
-    { name: 'Unit Completed', sortOrder: 6, departmentId: departments['ASSY'], requiredPermission: 'task:start', actionLabel: 'Mark Unit Completed', allowsBackward: true },
+    // Assembly Started. "Unit Completed" carries the gatesOnPartsComplete
+    // flag: advance() blocks entry here while any part is unfinished. The
+    // flag (not the stage name) drives that rule now, so a deployment can
+    // move the quality gate elsewhere.
+    { name: 'Unit Completed', sortOrder: 6, departmentId: departments['ASSY'], requiredPermission: 'task:start', actionLabel: 'Mark Unit Completed', allowsBackward: true, gatesOnPartsComplete: true },
     { name: 'Testing', sortOrder: 7, departmentId: departments['QA'], requiredPermission: 'qc:manage', actionLabel: 'Unit Tested', allowsBackward: true },
     { name: 'Dispatch', sortOrder: 8, departmentId: departments['LOG'], requiredPermission: 'shipment:manage', actionLabel: 'Dispatched' },
     // Genuine terminal stage. Dispatch used to be the last stage, which
@@ -711,7 +711,7 @@ async function main() {
   for (const stage of workflowStageData) {
     await prisma.workflowStage.upsert({
       where: { name: stage.name },
-      update: { sortOrder: stage.sortOrder, departmentId: stage.departmentId, requiredPermission: stage.requiredPermission, actionLabel: stage.actionLabel, isTerminal: (stage as any).isTerminal ?? false },
+      update: { sortOrder: stage.sortOrder, departmentId: stage.departmentId, requiredPermission: stage.requiredPermission, actionLabel: stage.actionLabel, isTerminal: (stage as any).isTerminal ?? false, gatesOnPartsComplete: (stage as any).gatesOnPartsComplete ?? false, isManagerBoundary: (stage as any).isManagerBoundary ?? false },
       create: stage,
     });
   }

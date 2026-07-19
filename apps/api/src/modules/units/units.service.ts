@@ -204,27 +204,17 @@ export class UnitsService {
   }
 
   async managerSummary() {
-    // The Production Manager's responsibility ends once a unit is past
-    // Assembly Started - after that it's QC/dispatch's problem, not a
-    // release-to-production concern. Previously this hardcoded the list
-    // of "past assembly" stage names, which breaks the moment a
-    // deployment renames or reorders stages. Instead we resolve the
-    // Assembly-boundary stage's sortOrder at query time and exclude
-    // anything at or beyond it (plus anything on a terminal stage).
-    // "Assembly Started" is still referenced by name here as the manager
-    // boundary, but only to look up its position - a renamed pipeline
-    // that keeps an equivalent boundary stage can point this at whatever
-    // it's called via a single constant.
-    const MANAGER_BOUNDARY_STAGE = 'Assembly Started';
-    const boundary = await this.prisma.workflowStage.findFirst({
-      where: { name: MANAGER_BOUNDARY_STAGE },
-      select: { sortOrder: true },
-    });
+    // The Production Manager's responsibility ends once a unit is past the
+    // manager-boundary stage - after that it's QC/dispatch's problem, not a
+    // release-to-production concern. The boundary is resolved by the
+    // isManagerBoundary flag (see managerBoundarySortOrder), so a renamed
+    // or reordered pipeline still works with no code change.
+    const boundarySortOrder = await this.managerBoundarySortOrder();
     const units = await this.prisma.unit.findMany({
       where: this.activeUnitsWhere({
         OR: [
           { currentWorkflowStageId: null },
-          { currentWorkflowStage: { isTerminal: false, ...(boundary ? { sortOrder: { lte: boundary.sortOrder } } : {}) } },
+          { currentWorkflowStage: { isTerminal: false, ...(boundarySortOrder !== null ? { sortOrder: { lte: boundarySortOrder } } : {}) } },
         ],
       }),
       include: {
@@ -407,18 +397,14 @@ export class UnitsService {
     // clicks "Start Building Unit" - it never gets cleared, so on its
     // own it can't tell "still being built" apart from "finished
     // Assembly ages ago and is now sitting in Testing or Dispatch".
-    // We exclude units that have advanced past the Assembly boundary
-    // stage by resolving that stage's sortOrder at query time rather
-    // than hardcoding the downstream stage names - white-label safe.
-    const ASSEMBLY_BOUNDARY_STAGE = 'Assembly Started';
-    const boundary = await this.prisma.workflowStage.findFirst({
-      where: { name: ASSEMBLY_BOUNDARY_STAGE },
-      select: { sortOrder: true },
-    });
+    // We exclude units that have advanced past the manager-boundary
+    // stage, resolved via the isManagerBoundary flag rather than a
+    // hardcoded stage name - white-label safe.
+    const boundarySortOrder = await this.managerBoundarySortOrder();
     const notPastAssembly: Prisma.UnitWhereInput = {
       OR: [
         { currentWorkflowStageId: null },
-        { currentWorkflowStage: boundary ? { sortOrder: { lte: boundary.sortOrder } } : { isTerminal: false } },
+        { currentWorkflowStage: boundarySortOrder !== null ? { sortOrder: { lte: boundarySortOrder } } : { isTerminal: false } },
       ],
     };
 
@@ -596,6 +582,19 @@ export class UnitsService {
         extra,
       ],
     };
+  }
+
+  // sortOrder of the stage flagged isManagerBoundary - the point past which
+  // a unit leaves the Manager's and Assembly's active WIP views. Resolved
+  // by flag, not a hardcoded stage name, so a renamed/restructured pipeline
+  // still finds its boundary. Returns null if no stage is flagged (in which
+  // case callers fall back to excluding only terminal-stage units).
+  private async managerBoundarySortOrder(): Promise<number | null> {
+    const boundary = await this.prisma.workflowStage.findFirst({
+      where: { isManagerBoundary: true },
+      select: { sortOrder: true },
+    });
+    return boundary?.sortOrder ?? null;
   }
 
   async createPartWithTasks(tx: Prisma.TransactionClient, unitId: string, partTypeId: string, quantity: number, priorityLevelId: string, userId: string) {
