@@ -10,6 +10,14 @@ import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { JwtPayload, AuthTokens, AuthUser } from '@hvacflow/shared-types';
 
+// A fixed bcrypt hash (of a random throwaway string) compared against when
+// no valid user is found, so a failed login takes the same time whether the
+// email is unknown/inactive or the password is simply wrong. Without this,
+// an unknown email returns instantly while a real email pays bcrypt's ~100ms
+// cost - a measurable timing side-channel that lets an attacker enumerate
+// which emails are registered. Computed once at module load, not per request.
+const DUMMY_PASSWORD_HASH = bcrypt.hashSync('unused-timing-equalizer-value', 12);
+
 @Injectable()
 export class AuthService {
   constructor(
@@ -23,12 +31,14 @@ export class AuthService {
       where: { email, deletedAt: null },
     });
 
-    if (!user || !user.isActive) {
-      return null;
-    }
+    // Always run a bcrypt comparison, even when the user is missing or
+    // inactive, so response time doesn't reveal whether the email exists
+    // (prevents user enumeration via timing). The dummy compare will never
+    // match, so an unknown/inactive user still fails - just in constant time.
+    const hashToCompare = user?.isActive ? user.passwordHash : DUMMY_PASSWORD_HASH;
+    const passwordValid = await bcrypt.compare(password, hashToCompare);
 
-    const passwordValid = await bcrypt.compare(password, user.passwordHash);
-    if (!passwordValid) {
+    if (!user || !user.isActive || !passwordValid) {
       return null;
     }
 
