@@ -62,6 +62,24 @@ export class DepartmentsService {
 
   async update(id: string, dto: UpdateDepartmentDto) {
     await this.findOne(id);
+
+    // Deactivating a department removes its shop-floor column (mission
+    // control only builds columns for active departments), which would
+    // strand any in-progress work there - the tasks still exist but become
+    // invisible and unworkable. The frontend warns about this, but that's
+    // advisory only; enforce it on the backend too. Block deactivation while
+    // the department has tasks that aren't finished/cancelled.
+    if (dto.isActive === false) {
+      const activeTaskCount = await this.prisma.productionTask.count({
+        where: { departmentId: id, status: { notIn: ['Completed', 'Rejected'] } },
+      });
+      if (activeTaskCount > 0) {
+        throw new ConflictException(
+          `Cannot deactivate this department - ${activeTaskCount} task(s) are still active in it. Those units would be stranded with no shop-floor column. Complete or reroute them first.`,
+        );
+      }
+    }
+
     return this.prisma.department.update({ where: { id }, data: dto });
   }
 
