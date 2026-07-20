@@ -738,7 +738,7 @@ async function main() {
   for (const stage of workflowStageData) {
     await prisma.workflowStage.upsert({
       where: { name: stage.name },
-      update: { sortOrder: stage.sortOrder, departmentId: stage.departmentId, requiredPermission: stage.requiredPermission, actionLabel: stage.actionLabel, isTerminal: (stage as any).isTerminal ?? false, gatesOnPartsComplete: (stage as any).gatesOnPartsComplete ?? false, isManagerBoundary: (stage as any).isManagerBoundary ?? false },
+      update: { sortOrder: stage.sortOrder, departmentId: stage.departmentId, requiredPermission: stage.requiredPermission, actionLabel: stage.actionLabel, isTerminal: (stage as any).isTerminal ?? false, gatesOnPartsComplete: (stage as any).gatesOnPartsComplete ?? false, gatesOnVendorPartsReceived: (stage as any).gatesOnVendorPartsReceived ?? false, isManagerBoundary: (stage as any).isManagerBoundary ?? false },
       create: stage,
     });
   }

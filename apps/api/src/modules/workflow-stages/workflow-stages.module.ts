@@ -24,6 +24,7 @@ class CreateWorkflowStageDto {
   @IsOptional() @IsBoolean() allowsBackward?: boolean;
   @IsOptional() @IsBoolean() isTerminal?: boolean;
   @IsOptional() @IsBoolean() gatesOnPartsComplete?: boolean;
+  @IsOptional() @IsBoolean() gatesOnVendorPartsReceived?: boolean;
   @IsOptional() @IsBoolean() isManagerBoundary?: boolean;
 }
 
@@ -202,6 +203,21 @@ export class WorkflowStagesService {
       if (unfinished.length > 0) {
         throw new ConflictException(
           `Cannot mark this unit completed - ${unfinished.length} part(s) still have unfinished work: ${unfinished.map((p) => p.partType.name).join(', ')}`,
+        );
+      }
+    }
+
+    // Optional gate: block entry while any bought-in vendor part is still
+    // outstanding. Independent of the parts-complete gate above, since
+    // manufactured Parts and bought-in VendorParts are tracked separately.
+    if (nextStage.gatesOnVendorPartsReceived) {
+      const outstanding = await this.prisma.vendorPart.findMany({
+        where: { unitId, isReceived: false },
+        select: { partType: { select: { name: true } } },
+      });
+      if (outstanding.length > 0) {
+        throw new ConflictException(
+          `Cannot advance this unit - ${outstanding.length} vendor part(s) not yet received: ${outstanding.map((v) => v.partType.name).join(', ')}`,
         );
       }
     }

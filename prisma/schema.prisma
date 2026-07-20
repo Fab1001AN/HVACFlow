@@ -630,6 +630,14 @@ model WorkflowStage {
   // "Unit Completed"; now any deployment can put that quality gate wherever
   // its pipeline needs it (or nowhere) without touching code.
   gatesOnPartsComplete Boolean @default(false)
+  // Enforces "all bought-in vendor parts must be received before a unit can
+  // enter this stage". Off by default. A shop that can't finish/ship a unit
+  // while a purchased component (compressor, controller, etc.) is still
+  // outstanding turns this on for its completion or dispatch stage; a shop
+  // that fits vendor parts on a parallel track leaves it off. Separate from
+  // gatesOnPartsComplete because manufactured Parts and bought-in VendorParts
+  // are tracked independently.
+  gatesOnVendorPartsReceived Boolean @default(false)
   // Marks the end of the Production Manager's / Assembly's active
   // responsibility. A unit at or before this stage's position still shows
   // on the Manager and Assembly WIP views; past it, it's QC/dispatch's
