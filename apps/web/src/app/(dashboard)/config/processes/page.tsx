@@ -139,6 +139,7 @@ export default function ProcessesConfigPage() {
             <div key={deptName}>
               <h3 className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-2 px-1">{deptName}</h3>
               <Card className="overflow-hidden">
+                <div className="overflow-x-auto">
                 <table className="w-full text-sm table-fixed">
                   <colgroup>
                     <col />
@@ -202,6 +203,7 @@ export default function ProcessesConfigPage() {
                     ))}
                   </tbody>
                 </table>
+                </div>
               </Card>
             </div>
           ))
