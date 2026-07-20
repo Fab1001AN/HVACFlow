@@ -67,8 +67,24 @@ class SetRolePermissionsDto {
 export class UsersService {
   constructor(private readonly prisma: PrismaService) {}
 
-  private userIncludes() {
+  // Explicit field selection that NEVER includes passwordHash. Using
+  // Prisma `select` (not `include`) means the hash never even leaves the
+  // database into the app layer, so it can't leak through any response
+  // built from these queries. Do not switch this back to `include` - that
+  // returns every scalar field including passwordHash, which was a real
+  // leak (findAll/findOne responses exposed the bcrypt hash to any client
+  // with user:view). There is no @Exclude()/entity-class serialization in
+  // this codebase, so query-level omission is the actual safeguard.
+  private userSelect() {
     return {
+      id: true,
+      email: true,
+      name: true,
+      isActive: true,
+      lastLoginAt: true,
+      createdAt: true,
+      updatedAt: true,
+      deletedAt: true,
       roles: { include: { role: true } },
       departments: { include: { department: true } },
     };
@@ -88,7 +104,7 @@ export class UsersService {
           ],
         } : {}),
       },
-      include: this.userIncludes(),
+      select: this.userSelect(),
       orderBy: { name: 'asc' },
     });
   }
@@ -96,7 +112,7 @@ export class UsersService {
   async findOne(id: string) {
     const user = await this.prisma.user.findUnique({
       where: { id, deletedAt: null },
-      include: this.userIncludes(),
+      select: this.userSelect(),
     });
     if (!user) throw new NotFoundException('User not found');
     return user;
@@ -151,7 +167,7 @@ export class UsersService {
 
     return this.prisma.user.create({
       data: { ...rest, passwordHash },
-      include: this.userIncludes(),
+      select: this.userSelect(),
     });
   }
 
@@ -166,7 +182,7 @@ export class UsersService {
     return this.prisma.user.update({
       where: { id },
       data: dto,
-      include: this.userIncludes(),
+      select: this.userSelect(),
     });
   }
 
