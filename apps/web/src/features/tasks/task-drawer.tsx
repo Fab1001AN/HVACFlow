@@ -149,7 +149,7 @@ export function TaskDrawer({ taskId, onClose }: TaskDrawerProps) {
           <Spinner className="w-6 h-6" />
         </div>
       ) : !task ? null : (
-        <div className="flex flex-col h-full">
+        <div className="flex flex-col min-h-full">
           {/* ─── Task metadata ─────────────────────────────────────── */}
           <div className="px-5 py-4 space-y-3 border-b border-border">
             <div className="flex items-center gap-2 flex-wrap">
