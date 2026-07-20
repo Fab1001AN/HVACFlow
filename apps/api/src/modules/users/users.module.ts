@@ -102,6 +102,46 @@ export class UsersService {
     return user;
   }
 
+  // config:manage is the permission that gates all user/role/department
+  // administration - a user with it is an "administrator" for lockout
+  // purposes. These helpers back the guard that stops the last admin from
+  // being removed by ANY route (delete, deactivate, or role-strip), since
+  // each of those independently reaches the same "nobody can administer
+  // the system anymore" state.
+  private readonly ADMIN_PERMISSION = 'config:manage';
+
+  private async userIsAdmin(userId: string): Promise<boolean> {
+    const roles = await this.prisma.userRole.findMany({
+      where: { userId },
+      include: { role: { include: { permissions: { include: { permission: true } } } } },
+    });
+    return roles.some((ur) => ur.role.permissions.some((rp) => rp.permission.code === this.ADMIN_PERMISSION));
+  }
+
+  private async otherActiveAdminsExist(excludeUserId: string): Promise<boolean> {
+    const count = await this.prisma.user.count({
+      where: {
+        id: { not: excludeUserId },
+        deletedAt: null,
+        isActive: true,
+        roles: { some: { role: { permissions: { some: { permission: { code: this.ADMIN_PERMISSION } } } } } },
+      },
+    });
+    return count > 0;
+  }
+
+  /**
+   * Throws if removing this user's admin access (by deletion, deactivation,
+   * or role change) would leave the system with zero active administrators.
+   * Call BEFORE any such change. No-op if the user isn't currently an admin,
+   * or if other active admins remain.
+   */
+  private async assertNotLastAdmin(userId: string, action: string): Promise<void> {
+    if (!(await this.userIsAdmin(userId))) return;
+    if (await this.otherActiveAdminsExist(userId)) return;
+    throw new ConflictException(`Cannot ${action} the last administrator - the system would have no one able to manage users, roles, or configuration.`);
+  }
+
   async create(dto: CreateUserDto) {
     const existing = await this.prisma.user.findUnique({ where: { email: dto.email } });
     if (existing) throw new ConflictException('Email already in use');
@@ -117,6 +157,12 @@ export class UsersService {
 
   async update(id: string, dto: UpdateUserDto) {
     await this.findOne(id);
+    // Deactivating a user removes their ability to log in - if they're the
+    // last admin, that's the same lockout as deleting them, so guard it the
+    // same way. Only checked when actually turning isActive off.
+    if (dto.isActive === false) {
+      await this.assertNotLastAdmin(id, 'deactivate');
+    }
     return this.prisma.user.update({
       where: { id },
       data: dto,
@@ -126,6 +172,23 @@ export class UsersService {
 
   async setRoles(id: string, dto: SetUserRolesDto) {
     await this.findOne(id);
+
+    // If this change would strip admin access from the last remaining
+    // admin, block it. We check the NEW role set: only a problem if the
+    // user is currently the last admin AND the incoming roles no longer
+    // grant config:manage.
+    if (await this.userIsAdmin(id) && !(await this.otherActiveAdminsExist(id))) {
+      const newRolesGrantAdmin = dto.roleIds.length > 0 && await this.prisma.role.count({
+        where: {
+          id: { in: dto.roleIds },
+          permissions: { some: { permission: { code: this.ADMIN_PERMISSION } } },
+        },
+      }) > 0;
+      if (!newRolesGrantAdmin) {
+        throw new ConflictException('Cannot remove administrator access from the last administrator - the system would have no one able to manage users, roles, or configuration.');
+      }
+    }
+
     await this.prisma.userRole.deleteMany({ where: { userId: id } });
     if (dto.roleIds.length > 0) {
       await this.prisma.userRole.createMany({
@@ -142,27 +205,11 @@ export class UsersService {
       throw new BadRequestException('You cannot delete your own account');
     }
 
-    // Guard against removing the last active user with a role that has admin-level access
-    // (config:manage is the permission that gates user/role/department management).
-    const targetRoles = await this.prisma.userRole.findMany({
-      where: { userId: id },
-      include: { role: { include: { permissions: { include: { permission: true } } } } },
-    });
-    const targetIsAdmin = targetRoles.some((ur) =>
-      ur.role.permissions.some((rp) => rp.permission.code === 'config:manage'),
-    );
-    if (targetIsAdmin) {
-      const otherAdmins = await this.prisma.user.count({
-        where: {
-          id: { not: id },
-          deletedAt: null,
-          roles: { some: { role: { permissions: { some: { permission: { code: 'config:manage' } } } } } },
-        },
-      });
-      if (otherAdmins === 0) {
-        throw new ConflictException('Cannot delete the last administrator account');
-      }
-    }
+    // Same last-admin protection used by update()/setRoles(). (This also
+    // fixes a subtle bug in the previous inline check, which counted
+    // deactivated admins as valid "other admins" - a deactivated admin
+    // can't log in, so it shouldn't have satisfied the guard.)
+    await this.assertNotLastAdmin(id, 'delete');
 
     return this.prisma.user.update({
       where: { id },
@@ -228,7 +275,33 @@ export class RolesService {
   }
 
   async setPermissions(id: string, dto: SetRolePermissionsDto) {
-    await this.findOne(id);
+    const role = await this.findOne(id);
+
+    // Prevent locking everyone out by stripping config:manage (the admin
+    // permission) from a role if no other route to admin access remains.
+    // Only a concern when: this role currently grants config:manage, the
+    // new set drops it, and no OTHER role grants it to an active user.
+    const roleCurrentlyGrantsAdmin = await this.prisma.rolePermission.count({
+      where: { roleId: id, permission: { code: 'config:manage' } },
+    }) > 0;
+    if (roleCurrentlyGrantsAdmin) {
+      const newSetKeepsAdmin = dto.permissionIds.length > 0 && await this.prisma.permission.count({
+        where: { id: { in: dto.permissionIds }, code: 'config:manage' },
+      }) > 0;
+      if (!newSetKeepsAdmin) {
+        const adminViaOtherRole = await this.prisma.user.count({
+          where: {
+            deletedAt: null,
+            isActive: true,
+            roles: { some: { roleId: { not: id }, role: { permissions: { some: { permission: { code: 'config:manage' } } } } } },
+          },
+        });
+        if (adminViaOtherRole === 0) {
+          throw new ConflictException('Cannot remove administrator access from this role - no other active administrator would remain, locking everyone out of user, role, and configuration management.');
+        }
+      }
+    }
+
     await this.prisma.rolePermission.deleteMany({ where: { roleId: id } });
     if (dto.permissionIds.length > 0) {
       await this.prisma.rolePermission.createMany({
