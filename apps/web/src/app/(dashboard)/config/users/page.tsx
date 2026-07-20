@@ -27,6 +27,7 @@ export default function UsersPage() {
   const { data: users = [], isLoading } = useQuery({ queryKey: ['users'], queryFn: () => api.users.list() });
   const { data: roles = [] } = useQuery({ queryKey: ['roles'], queryFn: () => api.roles.list(), staleTime: Infinity });
   const { data: departments = [] } = useQuery({ queryKey: ['departments'], queryFn: () => api.departments.list({ isActive: true }), staleTime: Infinity });
+  const { data: previewAudit = [] } = useQuery({ queryKey: ['impersonation-audit'], queryFn: () => api.auth.impersonationAudit() });
 
   const createMutation = useMutation({
     mutationFn: async (body: any) => {
@@ -195,6 +196,33 @@ export default function UsersPage() {
                         </Button>
                       </div>
                     </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </Card>
+        )}
+
+        {(previewAudit as any[]).length > 0 && (
+          <Card className="overflow-hidden max-w-4xl mt-6">
+            <div className="px-4 py-3 border-b border-border">
+              <h3 className="text-sm font-medium text-foreground">Preview history</h3>
+              <p className="text-xs text-muted-foreground">A record of every read-only "view as" preview. Most recent first.</p>
+            </div>
+            <table className="w-full text-sm">
+              <thead className="bg-secondary border-b border-border">
+                <tr>
+                  <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground">Admin</th>
+                  <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground">Previewed</th>
+                  <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground">When</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border">
+                {(previewAudit as any[]).map((entry) => (
+                  <tr key={entry.id}>
+                    <td className="px-4 py-2.5 text-foreground">{entry.adminName}</td>
+                    <td className="px-4 py-2.5 text-foreground">{entry.targetUserName}</td>
+                    <td className="px-4 py-2.5 text-muted-foreground">{new Date(entry.createdAt).toLocaleString()}</td>
                   </tr>
                 ))}
               </tbody>

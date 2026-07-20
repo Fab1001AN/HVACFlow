@@ -219,6 +219,23 @@ export class AuthService {
       expiresIn: '30m',
     });
 
+    // Accountability trail: record who previewed whom. Names are snapshotted
+    // so the entry stays meaningful even if an account is deleted later.
+    // Wrapped so an audit-write failure can never block the preview itself.
+    try {
+      await this.prisma.impersonationAudit.create({
+        data: {
+          adminId: admin.id,
+          targetUserId: target.id,
+          adminName: admin.name,
+          targetUserName: target.name,
+        },
+      });
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error('Failed to write impersonation audit entry:', err);
+    }
+
     return {
       accessToken,
       user: {
@@ -248,6 +265,14 @@ export class AuthService {
       } satisfies AuthUser,
       impersonatedBy: { id: admin.id, name: admin.name },
     };
+  }
+
+  /** Admin-only: the impersonation/"view as" audit trail, most recent first. */
+  async listImpersonationAudit(limit = 200) {
+    return this.prisma.impersonationAudit.findMany({
+      orderBy: { createdAt: 'desc' },
+      take: Math.min(Math.max(limit, 1), 500),
+    });
   }
 
   private async getFullUser(userId: string) {

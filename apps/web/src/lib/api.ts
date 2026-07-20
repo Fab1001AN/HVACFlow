@@ -230,6 +230,8 @@ export const api = {
     logout: () => api.post('/auth/logout'),
     impersonate: (userId: string) =>
       api.post<{ accessToken: string; user: any; impersonatedBy: { id: string; name: string } }>(`/auth/impersonate/${userId}`),
+    impersonationAudit: () =>
+      api.get<Array<{ id: string; adminName: string; targetUserName: string; createdAt: string }>>('/auth/impersonate/audit'),
   },
 
   // ─── Configuration ───────────────────────────────────────────────────────

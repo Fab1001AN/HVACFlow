@@ -121,8 +121,33 @@ model User {
   reworkAssigned          UnitRework[] @relation("ReworkAssignedTo")
   reworkCreated           UnitRework[] @relation("ReworkCreatedBy")
   shipmentsCreated        ShipmentRecord[]
+  impersonationsMade      ImpersonationAudit[] @relation("ImpersonationAdmin")
+  impersonationsReceived  ImpersonationAudit[] @relation("ImpersonationTarget")
 
   @@map("users")
+}
+
+// Records every "view as" / impersonation preview an admin starts, so
+// there is an accountability trail of who previewed whom and when. The
+// preview itself is read-only (enforced by ImpersonationGuard); this table
+// exists purely for auditing. Deliberately separate from ActivityLog,
+// which is unit-scoped and can't represent a user-level event. Rows are
+// retained even if a user is later soft-deleted (SetNull) so the history
+// isn't lost - the audit outlives the account.
+model ImpersonationAudit {
+  id             String   @id @default(uuid())
+  adminId        String?
+  targetUserId   String?
+  adminName      String   // denormalised snapshot so the log survives account deletion
+  targetUserName String
+  createdAt      DateTime @default(now())
+
+  admin      User? @relation("ImpersonationAdmin", fields: [adminId], references: [id], onDelete: SetNull)
+  targetUser User? @relation("ImpersonationTarget", fields: [targetUserId], references: [id], onDelete: SetNull)
+
+  @@index([createdAt])
+  @@index([adminId, createdAt])
+  @@map("impersonation_audits")
 }
 
 model Role {

@@ -43,6 +43,14 @@ export class AuthController {
     return this.authService.impersonate(admin.sub, userId);
   }
 
+  @Get('impersonate/audit')
+  @ApiBearerAuth()
+  @RequirePermissions('user:manage')
+  @ApiOperation({ summary: 'Admin: view the impersonation / "view as" audit trail' })
+  async impersonationAudit() {
+    return this.authService.listImpersonationAudit();
+  }
+
   @Post('logout')
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Logout (client should discard tokens)' })
