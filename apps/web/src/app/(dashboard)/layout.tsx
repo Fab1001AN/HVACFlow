@@ -10,7 +10,7 @@ import { cn, initials } from '@/lib/utils';
 import {
   LayoutDashboard, Users, FolderOpen, ShoppingBag, Box, Settings,
   ChevronRight, LogOut, Building2, Sliders, Wrench, ClipboardList,
-  BarChart3, Cpu, GitBranch, Tag, Package, ListChecks, Menu, X, CalendarDays, Factory, GripVertical, Eye, ClipboardCheck, Workflow, FlaskConical, Truck,
+  BarChart3, Cpu, GitBranch, Tag, Package, ListChecks, Menu, X, CalendarDays, Factory, GripVertical, Eye, ClipboardCheck, Workflow, FlaskConical, Truck, ScrollText,
 } from 'lucide-react';
 
 const NAV_ITEMS = [
@@ -26,6 +26,7 @@ const NAV_ITEMS = [
   // Mirrors the backend's assertReportAccess() on this endpoint - the
   // single `permission` field is AND-only, same as the API's global guard.
   { href: '/dispatch-report', label: 'Dispatch Report', icon: Truck, anyPermission: ['shipment:manage', 'report:view'] },
+  { href: '/audit-log', label: 'Audit Log', icon: ScrollText, permission: 'config:manage' },
   { href: '/manager-dashboard', label: 'Manager Dashboard', icon: ClipboardList },
   { href: '/engineering-dashboard', label: 'Designing Dashboard', icon: Wrench },
 ];

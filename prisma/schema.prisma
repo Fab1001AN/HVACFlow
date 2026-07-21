@@ -123,6 +123,7 @@ model User {
   shipmentsCreated        ShipmentRecord[]
   impersonationsMade      ImpersonationAudit[] @relation("ImpersonationAdmin")
   impersonationsReceived  ImpersonationAudit[] @relation("ImpersonationTarget")
+  auditLogs               AuditLog[]           @relation("AuditActor")
 
   @@map("users")
 }
@@ -148,6 +149,32 @@ model ImpersonationAudit {
   @@index([createdAt])
   @@index([adminId, createdAt])
   @@map("impersonation_audits")
+}
+
+// System-wide audit trail: one row per successful mutating request
+// (create/update/delete on any entity), captured automatically by
+// AuditLogInterceptor. Compact by design - who, what action, which
+// entity, when - not a full field-level diff. Admin-only to read.
+// actorName is snapshotted so the entry survives if the user is later
+// deleted (actorId FK is SetNull).
+model AuditLog {
+  id         String   @id @default(uuid())
+  actorId    String?
+  actorName  String
+  action     String   // HTTP verb mapped to CREATE / UPDATE / DELETE
+  entity     String   // resource collection, e.g. "departments", "process-routes"
+  entityId   String?  // the affected record id, when present in the route
+  method     String   // raw HTTP method
+  path       String   // request path, for disambiguation
+  statusCode Int
+  createdAt  DateTime @default(now())
+
+  actor User? @relation("AuditActor", fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([createdAt])
+  @@index([actorId, createdAt])
+  @@index([entity, createdAt])
+  @@map("audit_logs")
 }
 
 model Role {

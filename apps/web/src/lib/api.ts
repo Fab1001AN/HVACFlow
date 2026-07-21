@@ -223,6 +223,19 @@ export const api = {
     update: (name: string) => api.patch<{ id: string; name: string }>('/organization-settings', { name }),
   },
 
+  auditLogs: {
+    list: (params?: { actorId?: string; entity?: string; action?: string; page?: number; pageSize?: number }) => {
+      const q = new URLSearchParams();
+      if (params?.actorId) q.set('actorId', params.actorId);
+      if (params?.entity) q.set('entity', params.entity);
+      if (params?.action) q.set('action', params.action);
+      if (params?.page) q.set('page', String(params.page));
+      if (params?.pageSize) q.set('pageSize', String(params.pageSize));
+      const qs = q.toString();
+      return api.get<{ items: any[]; total: number; page: number; pageSize: number; totalPages: number }>(`/audit-logs${qs ? `?${qs}` : ''}`);
+    },
+  },
+
   auth: {
     login: (email: string, password: string) =>
       api.post<{ tokens: { accessToken: string; refreshToken: string }; user: any }>('/auth/login', { email, password }),

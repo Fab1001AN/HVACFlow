@@ -4,6 +4,8 @@ import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { AppModule } from './app.module';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
 import { DecimalTransformInterceptor } from './common/interceptors/decimal-transform.interceptor';
+import { AuditLogInterceptor } from './common/interceptors/audit-log.interceptor';
+import { PrismaService } from './common/prisma/prisma.service';
 import { ConfigService } from '@nestjs/config';
 
 async function bootstrap() {
@@ -49,6 +51,7 @@ async function bootstrap() {
   app.useGlobalInterceptors(
     new ClassSerializerInterceptor(app.get(Reflector)),
     new DecimalTransformInterceptor(),
+    new AuditLogInterceptor(app.get(PrismaService)),
   );
 
   // ─── Global exception filter ────────────────────────────────────────────────

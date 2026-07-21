@@ -21,6 +21,7 @@ import { OrdersModule } from './modules/orders/orders.module';
 import { UnitsModule } from './modules/units/units.module';
 import { VendorPartsModule } from './modules/vendor-parts/vendor-parts.module';
 import { ActivityLogModule } from './modules/activity-log/activity-log.module';
+import { AuditLogViewModule } from './modules/audit-log/audit-log.module';
 import { OrganizationSettingsModule } from './modules/organization-settings/organization-settings.module';
 import { WorkflowStagesModule } from './modules/workflow-stages/workflow-stages.module';
 import { ReworkModule } from './modules/rework/rework.module';
@@ -70,6 +71,7 @@ import { ReportsModule } from './modules/reports/reports.module';
     UnitsModule,
     VendorPartsModule,
     ActivityLogModule,
+    AuditLogViewModule,
     OrganizationSettingsModule,
     WorkflowStagesModule,
     ReworkModule,
