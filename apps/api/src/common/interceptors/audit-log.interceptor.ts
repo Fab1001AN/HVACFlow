@@ -21,7 +21,22 @@ const MUTATING_METHODS = new Set(['POST', 'PATCH', 'PUT', 'DELETE']);
 // login isn't a data mutation), and the audit view itself.
 const SKIP_PATH_PREFIXES = ['/auth/login', '/auth/refresh', '/auth/logout', '/audit-logs'];
 
-function methodToAction(method: string): string {
+// Named action verbs that appear as the final path segment of a POST/PATCH
+// route (e.g. POST /orders/:id/cancel). For these, logging the raw HTTP
+// verb ("CREATE") is misleading - nothing is created, an order is
+// cancelled. So we surface the verb itself, which reads truthfully in the
+// audit log ("CANCEL orders" not "CREATE orders/cancel").
+const ACTION_VERBS = new Set([
+  'cancel', 'confirm', 'reopen', 'reject', 'complete', 'hold', 'resume',
+  'verify', 'start', 'release', 'reship', 'advance', 'move-back', 'send-back',
+  'mark-planned', 'start-assembly', 'start-manufacturing', 'reset-password',
+  'impersonate', 'reorder',
+]);
+
+function deriveAction(method: string, lastSegment: string): string {
+  if ((method === 'POST' || method === 'PATCH') && ACTION_VERBS.has(lastSegment)) {
+    return lastSegment.toUpperCase();
+  }
   switch (method) {
     case 'POST': return 'CREATE';
     case 'PATCH':
@@ -95,6 +110,7 @@ export class AuditLogInterceptor implements NestInterceptor {
 
       const user: JwtPayload | undefined = req?.user;
       const { entity, entityId } = parseEntity(path);
+      const lastSegment = path.split('?')[0].replace(/\/+$/, '').split('/').filter(Boolean).pop() ?? '';
 
       // Fire-and-forget: never await, never let a failure touch the request.
       this.prisma.auditLog
@@ -102,7 +118,7 @@ export class AuditLogInterceptor implements NestInterceptor {
           data: {
             actorId: user?.sub ?? null,
             actorName: user?.name ?? 'Unknown',
-            action: methodToAction(method),
+            action: deriveAction(method, lastSegment),
             entity,
             entityId,
             method,
