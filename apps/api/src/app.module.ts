@@ -1,4 +1,6 @@
 import { Module } from '@nestjs/common';
+import { APP_GUARD } from '@nestjs/core';
+import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { ConfigModule } from '@nestjs/config';
 import { appConfig, validateConfig } from './config/app.config';
 import { PrismaModule } from './common/prisma/prisma.module';
@@ -44,6 +46,21 @@ import { ReportsModule } from './modules/reports/reports.module';
       expandVariables: true,
     }),
 
+    // ─── Rate limiting (brute-force / abuse protection) ─────────────────────
+    // Global default: a generous per-IP cap so normal use is never affected,
+    // but runaway scripted abuse is bounded. Login gets a much stricter,
+    // per-route limit (see AuthController) to blunt password brute-forcing -
+    // there was previously NO throttling anywhere, so login could be hammered
+    // with unlimited guesses.
+    ThrottlerModule.forRoot({
+      throttlers: [{ name: 'default', ttl: 60_000, limit: 120 }],
+      // Only throttle HTTP. The realtime gateway uses a WebSocket context;
+      // skipping non-HTTP here guarantees the global guard never interferes
+      // with socket message handling (rather than relying on implicit
+      // request-extraction behaviour for ws contexts).
+      skipIf: (context) => context.getType() !== 'http',
+    }),
+
     // ─── Infrastructure ─────────────────────────────────────────────────────
     PrismaModule,
 
@@ -87,6 +104,12 @@ import { ReportsModule } from './modules/reports/reports.module';
     RealtimeModule,
     DashboardModule,
     ReportsModule,
+  ],
+  providers: [
+    // Global rate-limit guard. Runs alongside the auth/permission guards
+    // registered in AuthModule. Applies the 'default' policy everywhere and
+    // honours stricter per-route @Throttle() overrides (e.g. login).
+    { provide: APP_GUARD, useClass: ThrottlerGuard },
   ],
 })
 export class AppModule {}
