@@ -467,6 +467,8 @@ export const api = {
     resetPassword: (id: string, newPassword: string) =>
       api.post(`/users/${id}/reset-password`, { newPassword }),
     delete: (id: string) => api.delete(`/users/${id}`),
+    listDeleted: () => api.get<any[]>('/users/deleted'),
+    restore: (id: string) => api.post<any>(`/users/${id}/restore`),
   },
 
   roles: {

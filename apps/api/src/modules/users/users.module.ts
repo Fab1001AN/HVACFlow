@@ -160,13 +160,61 @@ export class UsersService {
 
   async create(dto: CreateUserDto) {
     const existing = await this.prisma.user.findUnique({ where: { email: dto.email } });
-    if (existing) throw new ConflictException('Email already in use');
+    if (existing) {
+      // The email's unique constraint is at the DB level and includes
+      // soft-deleted users, so distinguish the two cases - otherwise an
+      // admin sees "email already in use" for an email that belongs to no
+      // visible user (the owner was deleted and is hidden from the list),
+      // with no way forward.
+      if (existing.deletedAt) {
+        throw new ConflictException(
+          'This email belonged to a deleted user. Restore that account, or delete it permanently, to reuse the email.',
+        );
+      }
+      throw new ConflictException('Email already in use');
+    }
 
     const passwordHash = await bcrypt.hash(dto.password, 12);
     const { password, ...rest } = dto;
 
     return this.prisma.user.create({
       data: { ...rest, passwordHash },
+      select: this.userSelect(),
+    });
+  }
+
+  // List soft-deleted users so an admin can find and restore one (e.g. a
+  // returning employee, or an accidental deletion). Kept separate from the
+  // normal list, which only shows active accounts.
+  async findDeleted() {
+    return this.prisma.user.findMany({
+      where: { deletedAt: { not: null } },
+      select: this.userSelect(),
+      orderBy: { deletedAt: 'desc' },
+    });
+  }
+
+  // Restore a soft-deleted user: clears deletedAt and reactivates. Fails if
+  // the id isn't a deleted user, or if - while it was gone - a NEW active
+  // user was created with the same email (which the DB unique constraint
+  // would otherwise reject on restore, as a raw error).
+  async restore(id: string) {
+    const user = await this.prisma.user.findUnique({ where: { id } });
+    if (!user) throw new NotFoundException('User not found');
+    if (!user.deletedAt) throw new ConflictException('User is not deleted');
+
+    const emailTaken = await this.prisma.user.findFirst({
+      where: { email: user.email, deletedAt: null, id: { not: id } },
+    });
+    if (emailTaken) {
+      throw new ConflictException(
+        'Cannot restore: another active user now has this email. Change or remove that user first.',
+      );
+    }
+
+    return this.prisma.user.update({
+      where: { id },
+      data: { deletedAt: null, isActive: true },
       select: this.userSelect(),
     });
   }
@@ -365,9 +413,18 @@ export class UsersController {
     return this.service.findAll(search, departmentId, roleId);
   }
 
+  // Must be declared before @Get(':id') so "deleted" isn't captured as an id.
+  @Get('deleted')
+  @RequirePermissions('user:manage')
+  findDeleted() { return this.service.findDeleted(); }
+
   @Get(':id')
   @RequirePermissions('user:view')
   findOne(@Param('id') id: string) { return this.service.findOne(id); }
+
+  @Post(':id/restore')
+  @RequirePermissions('user:manage')
+  restore(@Param('id') id: string) { return this.service.restore(id); }
 
   @Post()
   @RequirePermissions('user:manage')

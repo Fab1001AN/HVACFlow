@@ -28,6 +28,17 @@ export default function UsersPage() {
   const { data: roles = [] } = useQuery({ queryKey: ['roles'], queryFn: () => api.roles.list(), staleTime: Infinity });
   const { data: departments = [] } = useQuery({ queryKey: ['departments'], queryFn: () => api.departments.list({ isActive: true }), staleTime: Infinity });
   const { data: previewAudit = [] } = useQuery({ queryKey: ['impersonation-audit'], queryFn: () => api.auth.impersonationAudit() });
+  const { data: deletedUsers = [] } = useQuery({ queryKey: ['users-deleted'], queryFn: () => api.users.listDeleted() });
+
+  const restoreMutation = useMutation({
+    mutationFn: (id: string) => api.users.restore(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['users'] });
+      queryClient.invalidateQueries({ queryKey: ['users-deleted'] });
+      toast('User restored', 'success');
+    },
+    onError: (err: any) => toast(err.message, 'error'),
+  });
 
   const createMutation = useMutation({
     mutationFn: async (body: any) => {
@@ -200,6 +211,41 @@ export default function UsersPage() {
                 ))}
               </tbody>
             </table>
+          </Card>
+        )}
+
+        {(deletedUsers as any[]).length > 0 && (
+          <Card className="overflow-hidden max-w-4xl mt-6">
+            <div className="px-4 py-3 border-b border-border">
+              <h3 className="text-sm font-medium text-foreground">Deleted users</h3>
+              <p className="text-xs text-muted-foreground">Restore a deleted account to reuse its email and bring the user back.</p>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="bg-secondary border-b border-border">
+                  <tr>
+                    <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground">Name</th>
+                    <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground">Email</th>
+                    <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground">Deleted</th>
+                    <th className="px-4 py-2.5 text-right text-xs font-medium text-muted-foreground">Action</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border">
+                  {(deletedUsers as any[]).map((u) => (
+                    <tr key={u.id}>
+                      <td className="px-4 py-2.5 text-foreground">{u.name}</td>
+                      <td className="px-4 py-2.5 text-muted-foreground">{u.email}</td>
+                      <td className="px-4 py-2.5 text-muted-foreground">{u.deletedAt ? new Date(u.deletedAt).toLocaleDateString() : '—'}</td>
+                      <td className="px-4 py-2.5 text-right">
+                        <Button variant="outline" size="sm" loading={restoreMutation.isPending} onClick={() => restoreMutation.mutate(u.id)}>
+                          Restore
+                        </Button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </Card>
         )}
 
