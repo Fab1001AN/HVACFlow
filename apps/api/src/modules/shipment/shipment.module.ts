@@ -1,5 +1,5 @@
 import {
-  Injectable, NotFoundException, ForbiddenException,
+  Injectable, NotFoundException, ForbiddenException, ConflictException,
   Controller, Get, Post, Patch, Res,
   Body, Param, Module,
 } from '@nestjs/common';
@@ -11,7 +11,7 @@ import PDFDocument from 'pdfkit';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
-import { JwtPayload } from '@hvacflow/shared-types';
+import { JwtPayload, UnitStatus } from '@hvacflow/shared-types';
 import { ActivityLogModule, ActivityLogService } from '../activity-log/activity-log.module';
 import { WorkflowStagesModule, WorkflowStagesService } from '../workflow-stages/workflow-stages.module';
 
@@ -55,9 +55,18 @@ export class ShipmentService {
   async create(unitId: string, dto: CreateShipmentDto, user: JwtPayload) {
     const unit = await this.prisma.unit.findUnique({
       where: { id: unitId, deletedAt: null },
-      select: { id: true },
+      select: { id: true, status: true },
     });
     if (!unit) throw new NotFoundException('Unit not found');
+
+    // A cancelled unit must never be shipped. Everything else is left
+    // intentionally flexible - reships after rework and backfill/correction
+    // shipments are legitimate and supported (see the auto-advance note
+    // below), so we don't block a second shipment or an "early" one; we only
+    // stop the one case that's always wrong.
+    if (unit.status === UnitStatus.Cancelled) {
+      throw new ConflictException('Cannot log a shipment for a cancelled unit.');
+    }
 
     const shipment = await this.prisma.shipmentRecord.create({
       data: {
