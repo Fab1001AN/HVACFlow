@@ -5,11 +5,12 @@ import { useRouter, usePathname } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import Link from 'next/link';
 import { api } from '@/lib/api';
+import { ChangePasswordModal } from '@/components/change-password-modal';
 import { useAuthStore } from '@/store/auth.store';
 import { cn, initials } from '@/lib/utils';
 import {
   LayoutDashboard, Users, FolderOpen, ShoppingBag, Box, Settings,
-  ChevronRight, LogOut, Building2, Sliders, Wrench, ClipboardList,
+  ChevronRight, LogOut, Building2, Sliders, Wrench, ClipboardList, KeyRound,
   BarChart3, Cpu, GitBranch, Tag, Package, ListChecks, Menu, X, CalendarDays, Factory, GripVertical, Eye, ClipboardCheck, Workflow, FlaskConical, Truck, ScrollText,
 } from 'lucide-react';
 
@@ -57,6 +58,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const [draggedNavHref, setDraggedNavHref] = useState<string | null>(null);
   const [deptSectionExpanded, setDeptSectionExpanded] = useState(true);
   const [configSectionExpanded, setConfigSectionExpanded] = useState(true);
+  const [changePasswordOpen, setChangePasswordOpen] = useState(false);
 
   useEffect(() => {
     const dept = localStorage.getItem('hvacflow:sidebar-departments-expanded');
@@ -288,6 +290,13 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                   <p className="text-xs text-muted-foreground truncate">{user.email}</p>
                 </div>
                 <button
+                  onClick={() => setChangePasswordOpen(true)}
+                  className="text-muted-foreground hover:text-foreground transition-colors"
+                  title="Change password"
+                >
+                  <KeyRound className="w-4 h-4" />
+                </button>
+                <button
                   onClick={logout}
                   className="text-muted-foreground hover:text-foreground transition-colors"
                   title="Sign out"
@@ -408,6 +417,8 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         )}
         <div className="flex-1 min-w-0 overflow-y-auto">{children}</div>
       </main>
+
+      <ChangePasswordModal open={changePasswordOpen} onClose={() => setChangePasswordOpen(false)} />
     </div>
   );
 }

@@ -2,7 +2,7 @@ import { Controller, Post, Get, Body, UseGuards, Request, Param } from '@nestjs/
 import { AuthGuard } from '@nestjs/passport';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { AuthService } from './auth.service';
-import { LoginDto, RefreshTokenDto } from './dto/auth.dto';
+import { LoginDto, RefreshTokenDto, ChangePasswordDto } from './dto/auth.dto';
 import { Public } from '../../common/decorators/public.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
@@ -33,6 +33,15 @@ export class AuthController {
   @ApiOperation({ summary: 'Get current authenticated user profile' })
   async me(@CurrentUser() user: JwtPayload) {
     return this.authService.getMe(user.sub);
+  }
+
+  @Post('change-password')
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Change your own password (verifies current password)' })
+  async changePassword(@CurrentUser() user: JwtPayload, @Body() dto: ChangePasswordDto) {
+    // Always the caller's own id from the token - never a path param - so
+    // this can only ever change the authenticated user's own password.
+    return this.authService.changePassword(user.sub, dto.currentPassword, dto.newPassword);
   }
 
   @Post('impersonate/:userId')

@@ -45,6 +45,35 @@ export class AuthService {
     return user;
   }
 
+  // Self-service password change for the logged-in user. Operates only on
+  // the authenticated user's own id (the caller passes their token's sub),
+  // so no one can change anyone else's password through this path. Requires
+  // and verifies the current password first - an attacker who grabs an
+  // unlocked session still can't silently change the password without
+  // knowing the current one. Distinct from the admin reset-password flow
+  // (which is for admins resetting others and needs user:manage).
+  async changePassword(userId: string, currentPassword: string, newPassword: string) {
+    const user = await this.prisma.user.findUnique({ where: { id: userId, deletedAt: null } });
+    if (!user || !user.isActive) {
+      throw new UnauthorizedException('Account not found or inactive');
+    }
+
+    const currentValid = await bcrypt.compare(currentPassword, user.passwordHash);
+    if (!currentValid) {
+      throw new BadRequestException('Current password is incorrect');
+    }
+
+    // Don't let the "new" password just be the same one again.
+    const sameAsOld = await bcrypt.compare(newPassword, user.passwordHash);
+    if (sameAsOld) {
+      throw new BadRequestException('New password must be different from the current password');
+    }
+
+    const passwordHash = await bcrypt.hash(newPassword, 12);
+    await this.prisma.user.update({ where: { id: userId }, data: { passwordHash } });
+    return { message: 'Password changed successfully' };
+  }
+
   async login(userId: string): Promise<{ tokens: AuthTokens; user: AuthUser }> {
     const user = await this.getFullUser(userId);
 
