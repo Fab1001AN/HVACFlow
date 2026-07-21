@@ -5,6 +5,7 @@ import {
   Patch,
   Body,
   Param,
+  Query,
   Module,
   Res,
 } from '@nestjs/common';
@@ -256,8 +257,14 @@ export class ReportsController {
   async exportTasks(
     @Res() res: Response,
     @CurrentUser() user: JwtPayload,
+    @Query('departmentId') departmentId?: string,
+    @Query('startDate') startDate?: string,
+    @Query('endDate') endDate?: string,
   ) {
-    const csv = await this.service.exportTasksCsv();
+    // The service already supports these filters; the controller previously
+    // dropped them and always dumped every task ever. Pass them through so
+    // reports can be scoped by department and date range.
+    const csv = await this.service.exportTasksCsv(departmentId, startDate, endDate);
     res.setHeader('Content-Type', 'text/csv');
     res.setHeader('Content-Disposition', 'attachment; filename="tasks-export.csv"');
     res.send(csv);
