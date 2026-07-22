@@ -28,10 +28,17 @@ export class UpdateUnitDto {
   @IsOptional() @Matches(/^\d{4}-(0[1-9]|1[0-2])$/) productionMonth?: string;
   @IsOptional() @IsDateString() dueDate?: string;
   @IsOptional() @IsInt() @Min(0) priorityPosition?: number;
-  @IsOptional() @IsString() currentStage?: string;
   @IsOptional() @IsBoolean() isBlocked?: boolean;
   @IsOptional() @IsString() holdReason?: string;
-  @IsOptional() status?: UnitStatus;
+  // status and currentStage are deliberately NOT settable here. Unit status
+  // is derived from task/stage state (deriveUnitStatus) and cancellation
+  // flows from cancelling the order; currentStage is owned by the workflow
+  // engine (advance/moveBack/sendBack, which enforce the stage rules and
+  // permissions). Allowing a raw PATCH to overwrite either would let a unit
+  // be hand-marked Completed with unfinished work, hidden from every
+  // dashboard by setting Cancelled, or teleported between stages with none
+  // of the gate checks. The frontend only ever sends isBlocked/holdReason
+  // and specifications through this endpoint.
   @IsOptional() @IsObject() specifications?: Record<string, unknown>;
   @IsOptional() @IsUrl({ require_protocol: true }) oneDriveFolderUrl?: string;
 }
@@ -526,7 +533,7 @@ export class UnitsService {
 
   async update(id: string, dto: UpdateUnitDto, userId?: string) {
     const before = await this.findOne(id);
-    const data: Prisma.UnitUpdateInput = { serialNumber: dto.serialNumber, displayName: dto.displayName, status: dto.status, currentStage: dto.currentStage, isBlocked: dto.isBlocked, holdReason: dto.holdReason, oneDriveFolderUrl: dto.oneDriveFolderUrl, priorityPosition: dto.priorityPosition, productionMonth: dto.productionMonth ? this.monthValue(dto.productionMonth) : undefined, dueDate: dto.dueDate ? new Date(dto.dueDate) : undefined, specifications: dto.specifications as Prisma.InputJsonValue | undefined, unitType: dto.unitTypeId ? { connect: { id: dto.unitTypeId } } : undefined, priorityLevel: dto.priorityLevelId ? { connect: { id: dto.priorityLevelId } } : undefined, currentDepartment: dto.currentDepartmentId ? { connect: { id: dto.currentDepartmentId } } : undefined };
+    const data: Prisma.UnitUpdateInput = { serialNumber: dto.serialNumber, displayName: dto.displayName, isBlocked: dto.isBlocked, holdReason: dto.holdReason, oneDriveFolderUrl: dto.oneDriveFolderUrl, priorityPosition: dto.priorityPosition, productionMonth: dto.productionMonth ? this.monthValue(dto.productionMonth) : undefined, dueDate: dto.dueDate ? new Date(dto.dueDate) : undefined, specifications: dto.specifications as Prisma.InputJsonValue | undefined, unitType: dto.unitTypeId ? { connect: { id: dto.unitTypeId } } : undefined, priorityLevel: dto.priorityLevelId ? { connect: { id: dto.priorityLevelId } } : undefined, currentDepartment: dto.currentDepartmentId ? { connect: { id: dto.currentDepartmentId } } : undefined };
     const updated = await this.prisma.unit.update({ where: { id }, data, include: this.unitSummaryInclude() });
     if (dto.isBlocked !== undefined && dto.isBlocked !== before.isBlocked) {
       await this.activityLog.log({
