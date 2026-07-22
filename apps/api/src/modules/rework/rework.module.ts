@@ -9,7 +9,7 @@ import { ReworkStatus, ActivityAction } from '@prisma/client';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
-import { JwtPayload } from '@hvacflow/shared-types';
+import { JwtPayload, UnitStatus } from '@hvacflow/shared-types';
 import { ActivityLogModule, ActivityLogService } from '../activity-log/activity-log.module';
 
 // ─── DTOs ─────────────────────────────────────────────────────────────────────
@@ -24,7 +24,12 @@ class UpdateReworkDto {
   @IsOptional() @IsUUID() assignedToUserId?: string;
   @IsOptional() @IsEnum(ReworkStatus) status?: ReworkStatus;
   @IsOptional() @IsString() @MaxLength(2000) notes?: string;
-  @IsOptional() @IsDateString() reshippedAt?: string;
+  // reshippedAt is deliberately NOT settable here. Recording a reship must
+  // go through reship(), which atomically creates the matching
+  // ShipmentRecord too - setting this field alone would recreate exactly
+  // the inconsistent state (rework marked reshipped with no shipment to
+  // prove it went out) that the atomic reship transaction exists to
+  // prevent. The frontend only ever calls the reship endpoint.
 }
 
 class ReshipDto {
@@ -57,8 +62,17 @@ export class ReworkService {
   }
 
   async create(unitId: string, dto: CreateReworkDto, userId: string) {
-    const unit = await this.prisma.unit.findUnique({ where: { id: unitId, deletedAt: null } });
+    const unit = await this.prisma.unit.findUnique({
+      where: { id: unitId, deletedAt: null },
+      select: { id: true, status: true },
+    });
     if (!unit) throw new NotFoundException('Unit not found');
+
+    // A cancelled unit shouldn't have new work opened against it - same
+    // reasoning as blocking shipments for cancelled units.
+    if (unit.status === UnitStatus.Cancelled) {
+      throw new ConflictException('Cannot open a rework on a cancelled unit.');
+    }
 
     const rework = await this.prisma.unitRework.create({
       data: { unitId, issue: dto.issue, assignedToUserId: dto.assignedToUserId, notes: dto.notes, createdByUserId: userId },
@@ -84,7 +98,6 @@ export class ReworkService {
         ...(dto.assignedToUserId !== undefined ? { assignedToUserId: dto.assignedToUserId } : {}),
         ...(dto.status !== undefined ? { status: dto.status } : {}),
         ...(dto.notes !== undefined ? { notes: dto.notes } : {}),
-        ...(dto.reshippedAt !== undefined ? { reshippedAt: new Date(dto.reshippedAt) } : {}),
         ...(justCompleted ? { completedAt: new Date() } : {}),
       },
       include: { assignedTo: { select: { id: true, name: true } }, createdBy: { select: { id: true, name: true } } },
