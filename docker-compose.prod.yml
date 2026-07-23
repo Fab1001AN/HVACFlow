@@ -1,0 +1,77 @@
+# HVACFlow - full stack in containers.
+#
+# This runs the database, API and web app together, so a customer machine
+# needs only Docker - no Node.js install, no build tooling.
+#
+#   docker compose -f docker-compose.prod.yml up -d --build
+#
+# The base docker-compose.yml (database only, for development) is left
+# untouched; use that with start.bat when working on the code.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: hvacflow_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-hvacflow}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-hvacflow}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-hvacflow}']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    container_name: hvacflow_api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: 4000
+      # Inside the Docker network the database is reached by SERVICE NAME
+      # ("postgres"), not localhost - localhost inside a container means the
+      # container itself.
+      DATABASE_URL: postgresql://${POSTGRES_USER:-hvacflow}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-hvacflow}?schema=public
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:?JWT_ACCESS_SECRET must be set in .env}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?JWT_REFRESH_SECRET must be set in .env}
+      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:3000}
+    ports:
+      - '${API_PORT:-4000}:4000'
+    # Apply any migrations that shipped with an update, seed a brand-new
+    # database, then start. If the migration fails the container stops rather
+    # than running against a half-updated database. The seed only populates
+    # an EMPTY instance (see prisma/seed.ts), so re-running it on every boot
+    # never clobbers a customer's configuration.
+    command: >
+      sh -c "npx prisma migrate deploy --schema=/app/prisma/schema.prisma
+      && node /app/dist-seed/seed.js
+      && node dist/main"
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      args:
+        # Baked in at build time - see the note in apps/web/Dockerfile.
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:4000/api/v1}
+        NEXT_PUBLIC_WS_URL: ${NEXT_PUBLIC_WS_URL:-http://localhost:4000}
+    container_name: hvacflow_web
+    restart: unless-stopped
+    depends_on:
+      - api
+    environment:
+      NODE_ENV: production
+    ports:
+      - '${WEB_PORT:-3000}:3000'
+
+volumes:
+  postgres_data:

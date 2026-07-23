@@ -1,0 +1,33 @@
+# Keeps the Docker build context small and stops local/sensitive files being
+# copied into images.
+
+node_modules
+**/node_modules
+
+# Build output - images build their own
+dist
+dist-seed
+.next
+**/dist
+**/.next
+*.tsbuildinfo
+
+# Local environment files. Real values are supplied by docker compose from
+# .env at run time; never bake them into an image layer.
+.env
+.env.local
+**/.env
+**/.env.local
+
+# Database backups contain all customer data and password hashes.
+backups
+
+# Version control and editor noise
+.git
+.gitignore
+.vscode
+.idea
+
+# Docs and patches aren't needed to run the app
+*.md
+*.patch

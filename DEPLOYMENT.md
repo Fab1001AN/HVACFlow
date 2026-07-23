@@ -2,9 +2,80 @@
 
 This covers running HVACFlow properly for real use, as opposed to development.
 
+There are two ways to run it:
+
+- **Docker (recommended for customer installs)** — everything runs in
+  containers. The machine needs only Docker Desktop; no Node.js, no build
+  tools. See "Installing with Docker" below.
+- **Directly on Windows** — uses the `.bat` scripts. Useful if you already
+  have Node.js set up, or for development. See the sections after that.
+
+---
+
+## Installing with Docker (recommended)
+
+The machine needs **Docker Desktop** and nothing else.
+
+1. Copy the HVACFlow folder onto the machine.
+2. Create a `.env` file next to `docker-compose.prod.yml` with these values:
+
+   ```
+   POSTGRES_USER=hvacflow
+   POSTGRES_PASSWORD=<pick a long random password>
+   POSTGRES_DB=hvacflow
+   JWT_ACCESS_SECRET=<pick a long random string>
+   JWT_REFRESH_SECRET=<pick a different long random string>
+   ```
+
+   These are required — the stack refuses to start without them rather than
+   falling back to insecure defaults.
+
+3. **If other computers will use HVACFlow**, also set this machine's address
+   (see the network section below for how to find it):
+
+   ```
+   NEXT_PUBLIC_API_URL=http://192.168.1.50:4000/api/v1
+   NEXT_PUBLIC_WS_URL=http://192.168.1.50:4000
+   CORS_ORIGIN=http://192.168.1.50:3000
+   ```
+
+4. Build and start:
+
+   ```
+   docker compose -f docker-compose.prod.yml up -d --build
+   ```
+
+   The first build takes several minutes. Later starts are quick.
+
+5. Open `http://localhost:3000` (or the address from step 3).
+
+Default login: `admin@hvacflow.com` / `Admin@HVACFlow1` — **change it
+immediately**.
+
+### Everyday Docker commands
+
+| Task                | Command                                                     |
+| ------------------- | ----------------------------------------------------------- |
+| Start               | `docker compose -f docker-compose.prod.yml up -d`            |
+| Stop                | `docker compose -f docker-compose.prod.yml down`             |
+| View logs           | `docker compose -f docker-compose.prod.yml logs -f`          |
+| Update to a new version | pull the new code, then `up -d --build`                 |
+
+Database updates are applied automatically when the API container starts. If
+one fails, the container stops instead of running against a half-updated
+database — your data is not altered.
+
+The containers restart automatically after a reboot, provided Docker Desktop
+is set to start with Windows.
+
+**Backups still matter.** `backup.bat` works against the Docker database (see
+`BACKUP.md`). If you changed the container name, adjust the script.
+
 ---
 
 ## Development vs production — which file do I run?
+
+If you are not using Docker, use these:
 
 | File                     | What it does                              | Use it for              |
 | ------------------------ | ----------------------------------------- | ----------------------- |
