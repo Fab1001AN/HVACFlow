@@ -253,12 +253,19 @@ export class UsersService {
       }
     }
 
-    await this.prisma.userRole.deleteMany({ where: { userId: id } });
-    if (dto.roleIds.length > 0) {
-      await this.prisma.userRole.createMany({
-        data: dto.roleIds.map((roleId) => ({ userId: id, roleId })),
-      });
-    }
+    // Replace the role set atomically. Previously the deleteMany and
+    // createMany ran as two separate statements: if the create failed after
+    // the delete succeeded (constraint error, dropped connection, crash),
+    // the user was left with ZERO roles - silently stripped of all access,
+    // with no error state to recover from.
+    await this.prisma.$transaction(async (tx) => {
+      await tx.userRole.deleteMany({ where: { userId: id } });
+      if (dto.roleIds.length > 0) {
+        await tx.userRole.createMany({
+          data: dto.roleIds.map((roleId) => ({ userId: id, roleId })),
+        });
+      }
+    });
     return this.findOne(id);
   }
 
@@ -284,12 +291,17 @@ export class UsersService {
 
   async setDepartments(id: string, dto: SetUserDepartmentsDto) {
     await this.findOne(id);
-    await this.prisma.userDepartment.deleteMany({ where: { userId: id } });
-    if (dto.departments.length > 0) {
-      await this.prisma.userDepartment.createMany({
-        data: dto.departments.map((d) => ({ userId: id, ...d })),
-      });
-    }
+    // Atomic replace - see setRoles. A partial failure here would leave the
+    // user assigned to no departments, so a department-scoped user would
+    // silently see nothing on the shop floor.
+    await this.prisma.$transaction(async (tx) => {
+      await tx.userDepartment.deleteMany({ where: { userId: id } });
+      if (dto.departments.length > 0) {
+        await tx.userDepartment.createMany({
+          data: dto.departments.map((d) => ({ userId: id, ...d })),
+        });
+      }
+    });
     return this.findOne(id);
   }
 
@@ -366,12 +378,19 @@ export class RolesService {
       }
     }
 
-    await this.prisma.rolePermission.deleteMany({ where: { roleId: id } });
-    if (dto.permissionIds.length > 0) {
-      await this.prisma.rolePermission.createMany({
-        data: dto.permissionIds.map((permissionId) => ({ roleId: id, permissionId })),
-      });
-    }
+    // Atomic replace. This is the highest-stakes of the three: if the
+    // create failed after the delete, the role would be left with NO
+    // permissions - stripping access from every user holding it at once.
+    // For the admin role that's the exact lockout the guard above prevents
+    // deliberately, reachable here by accident.
+    await this.prisma.$transaction(async (tx) => {
+      await tx.rolePermission.deleteMany({ where: { roleId: id } });
+      if (dto.permissionIds.length > 0) {
+        await tx.rolePermission.createMany({
+          data: dto.permissionIds.map((permissionId) => ({ roleId: id, permissionId })),
+        });
+      }
+    });
     return this.findOne(id);
   }
 
