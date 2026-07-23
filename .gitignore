@@ -47,3 +47,8 @@ coverage/
 next-env.d.ts
 
 *.patch
+
+# Database backups - contain ALL customer data and password hashes.
+# Never commit these to the repository.
+backups/
+*.sql.gz
