@@ -13,7 +13,7 @@ import {
   Query,
   Module,
 } from '@nestjs/common';
-import { IsString, IsEmail, IsOptional, IsBoolean, IsArray, IsUUID, MinLength } from 'class-validator';
+import { IsString, IsEmail, IsOptional, IsBoolean, IsArray, IsUUID, MinLength, MaxLength } from 'class-validator';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../../common/prisma/prisma.service';
@@ -24,14 +24,14 @@ import { JwtPayload } from '@hvacflow/shared-types';
 // ─── DTOs ─────────────────────────────────────────────────────────────────────
 
 class CreateUserDto {
-  @IsString() name: string;
+  @IsString() @MaxLength(255) name: string;
   @IsEmail() email: string;
   @IsString() @MinLength(8) password: string;
   @IsOptional() @IsBoolean() isActive?: boolean = true;
 }
 
 class UpdateUserDto {
-  @IsOptional() @IsString() name?: string;
+  @IsOptional() @IsString() @MaxLength(255) name?: string;
   @IsOptional() @IsBoolean() isActive?: boolean;
 }
 
@@ -48,13 +48,13 @@ class ResetPasswordDto {
 }
 
 class CreateRoleDto {
-  @IsString() name: string;
-  @IsOptional() @IsString() description?: string;
+  @IsString() @MaxLength(100) name: string;
+  @IsOptional() @IsString() @MaxLength(500) description?: string;
 }
 
 class UpdateRoleDto {
-  @IsOptional() @IsString() name?: string;
-  @IsOptional() @IsString() description?: string;
+  @IsOptional() @IsString() @MaxLength(100) name?: string;
+  @IsOptional() @IsString() @MaxLength(500) description?: string;
 }
 
 class SetRolePermissionsDto {

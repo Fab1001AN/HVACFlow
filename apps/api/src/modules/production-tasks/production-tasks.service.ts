@@ -13,7 +13,7 @@ import { ChecklistsService } from '../checklists/checklists.service';
 import { ActivityLogService } from '../activity-log/activity-log.module';
 import { ActivityAction } from '@prisma/client';
 import { TaskStatus } from '@hvacflow/shared-types';
-import { IsOptional, IsString, IsUUID, IsBoolean } from 'class-validator';
+import { IsOptional, IsString, IsUUID, IsBoolean, MaxLength } from 'class-validator';
 
 export class QueryTasksDto {
   departmentId?: string;
@@ -37,7 +37,7 @@ export class UpdateTaskDto {
 }
 
 export class TaskActionDto {
-  @IsOptional() @IsString() note?: string;
+  @IsOptional() @IsString() @MaxLength(2000) note?: string;
 }
 
 // Valid status transitions — enforced by the engine

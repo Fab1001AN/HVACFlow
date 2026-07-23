@@ -16,9 +16,9 @@ export class CreateChecklistItemDto {
 }
 
 export class UpdateChecklistItemDto {
-  @IsOptional() @IsString() label?: string;
+  @IsOptional() @IsString() @MaxLength(500) label?: string;
   @IsOptional() @IsBoolean() isRequired?: boolean;
-  @IsOptional() @IsInt() sortOrder?: number;
+  @IsOptional() @IsInt() @Min(0) sortOrder?: number;
 }
 
 @Injectable()

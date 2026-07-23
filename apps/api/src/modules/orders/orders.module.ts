@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException, ConflictException, BadRequestException } from '@nestjs/common';
 import { Controller, Get, Post, Patch, Delete, Body, Param, Query, Module } from '@nestjs/common';
-import { IsString, IsOptional, IsDateString, IsUUID, IsEnum } from 'class-validator';
+import { IsString, IsOptional, IsDateString, IsUUID, IsEnum, MaxLength } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { OrderStatus, UnitStatus } from '@hvacflow/shared-types';
@@ -16,7 +16,7 @@ class CreateOrderDto {
 }
 
 class UpdateOrderDto {
-  @IsOptional() @IsString() orderNumber?: string;
+  @IsOptional() @IsString() @MaxLength(100) orderNumber?: string;
   @IsOptional() @IsUUID() priorityLevelId?: string;
   @IsOptional() @IsDateString() requestedDeliveryDate?: string;
   @IsOptional() @IsString() notes?: string;

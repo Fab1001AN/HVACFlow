@@ -1,6 +1,6 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { EngineeringStatus, Prisma, ProductionReleaseStatus, ProductionTask, UnitStatus, ActivityAction } from '@prisma/client';
-import { IsBoolean, IsDateString, IsInt, IsObject, IsOptional, IsString, IsUUID, IsUrl, Matches, Min } from 'class-validator';
+import { IsBoolean, IsDateString, IsInt, IsObject, IsOptional, IsString, IsUUID, IsUrl, Matches, Min, MaxLength } from 'class-validator';
 import { TaskStatus } from '@hvacflow/shared-types';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { WorkflowProgressService } from '../workflow-progress/workflow-progress.service';
@@ -10,7 +10,7 @@ import { ActivityLogService } from '../activity-log/activity-log.module';
 export class CreateUnitDto {
   @IsUUID() unitTypeId: string;
   @IsString() serialNumber: string;
-  @IsOptional() @IsString() displayName?: string;
+  @IsOptional() @IsString() @MaxLength(255) displayName?: string;
   @IsOptional() @IsUUID() priorityLevelId?: string;
   @IsOptional() @Matches(/^\d{4}-(0[1-9]|1[0-2])$/) productionMonth?: string;
   @IsOptional() @IsDateString() dueDate?: string;
@@ -20,8 +20,8 @@ export class CreateUnitDto {
 }
 
 export class UpdateUnitDto {
-  @IsOptional() @IsString() serialNumber?: string;
-  @IsOptional() @IsString() displayName?: string;
+  @IsOptional() @IsString() @MaxLength(100) serialNumber?: string;
+  @IsOptional() @IsString() @MaxLength(255) displayName?: string;
   @IsOptional() @IsUUID() unitTypeId?: string;
   @IsOptional() @IsUUID() priorityLevelId?: string;
   @IsOptional() @IsUUID() currentDepartmentId?: string;

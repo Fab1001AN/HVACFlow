@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException, ConflictException, BadRequestException } from '@nestjs/common';
 import { Controller, Get, Post, Patch, Delete, Body, Param, Query, Module } from '@nestjs/common';
-import { IsString, IsOptional, IsUUID, IsObject, IsInt, Min, IsArray, ArrayMinSize } from 'class-validator';
+import { IsString, IsOptional, IsUUID, IsObject, IsInt, Min, IsArray, ArrayMinSize, MaxLength } from 'class-validator';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { WorkflowProgressService } from '../workflow-progress/workflow-progress.service';
@@ -29,7 +29,7 @@ class ReplacePartRouteDto {
 }
 
 class UpdatePartDto {
-  @IsOptional() @IsString() identifier?: string;
+  @IsOptional() @IsString() @MaxLength(100) identifier?: string;
   @IsOptional() @IsInt() @Min(1) quantity?: number;
   @IsOptional() @IsObject() specifications?: Record<string, unknown>;
 }
