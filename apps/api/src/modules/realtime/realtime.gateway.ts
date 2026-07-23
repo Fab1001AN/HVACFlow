@@ -107,14 +107,17 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
     this.server.to(`task:${taskId}`).emit('task.updated', payload);
   }
 
+  // These two deliberately broadcast to EVERY connected client, not just the
+  // unit's room, because supervisors watch a full board that spans units.
+  // The global emit already reaches anyone in `unit:<id>`, so emitting to
+  // that room as well delivered the same event twice to those clients -
+  // causing a duplicate query invalidation and refetch on the unit and part
+  // pages. One emit is enough; the audience is unchanged.
   emitPartProgressChanged(unitId: string, payload: WsPartProgressChanged) {
-    this.server.to(`unit:${unitId}`).emit('part.progressChanged', payload);
-    // Also broadcast to all departments (supervisors watching full board)
     this.server.emit('part.progressChanged', payload);
   }
 
   emitUnitProgressChanged(unitId: string, payload: WsUnitProgressChanged) {
-    this.server.to(`unit:${unitId}`).emit('unit.progressChanged', payload);
     this.server.emit('unit.progressChanged', payload);
   }
 
