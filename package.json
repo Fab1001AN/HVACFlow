@@ -9,9 +9,9 @@
   ],
   "scripts": {
     "dev": "npm run build:shared && concurrently --kill-others-on-fail --names SHARED,API,WEB \"npm run dev:shared\" \"npm run dev:api\" \"npm run dev:web\"",
-    "build": "npm run build:shared && npm run build --workspace=@hvacflow/api && npm run build --workspace=@hvacflow/web",
+    "build": "npm run db:generate && npm run build:shared && npm run build --workspace=@hvacflow/api && npm run build --workspace=@hvacflow/web",
     "lint": "npm run lint --workspace=@hvacflow/api && npm run lint --workspace=@hvacflow/web",
-    "typecheck": "npm run build:shared && npm run typecheck --workspace=@hvacflow/shared-types && npm run typecheck --workspace=@hvacflow/api && npm run typecheck --workspace=@hvacflow/web",
+    "typecheck": "npm run db:generate && npm run build:shared && npm run typecheck --workspace=@hvacflow/shared-types && npm run typecheck --workspace=@hvacflow/api && npm run typecheck --workspace=@hvacflow/web",
     "test": "npm run test --workspace=@hvacflow/api",
     "db:generate": "prisma generate --schema=./prisma/schema.prisma",
     "db:migrate": "prisma migrate dev --schema=./prisma/schema.prisma",
