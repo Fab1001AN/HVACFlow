@@ -106,14 +106,24 @@ async function request<T>(
   const url = buildUrl(path, options?.params);
   let token = getToken();
 
+  // FormData (file uploads) must NOT be JSON-encoded, and must not carry a
+  // manual Content-Type - the browser sets it with the multipart boundary.
+  // Handling it here rather than in a separate upload function means uploads
+  // still get token refresh and the impersonation guard above.
+  const isFormData = typeof FormData !== 'undefined' && body instanceof FormData;
+
   const makeRequest = async (authToken: string | null) =>
     fetch(url, {
       method,
       headers: {
-        'Content-Type': 'application/json',
+        ...(isFormData ? {} : { 'Content-Type': 'application/json' }),
         ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
       },
-      body: body !== undefined ? JSON.stringify(body) : undefined,
+      body: isFormData
+        ? (body as FormData)
+        : body !== undefined
+          ? JSON.stringify(body)
+          : undefined,
       signal: options?.signal,
     });
 
@@ -424,11 +434,34 @@ export const api = {
 
   vendorParts: {
     listByUnit: (unitId: string) => api.get<any[]>(`/units/${unitId}/vendor-parts`),
-    create: (unitId: string, body: { partTypeId: string; isReceived: boolean; expectedArrivalDate?: string; receivedDate?: string }) =>
+    create: (unitId: string, body: { partTypeId: string; isReceived: boolean; expectedArrivalDate?: string; receivedDate?: string; poReference?: string }) =>
       api.post<any>(`/units/${unitId}/vendor-parts`, body),
-    update: (id: string, body: { isReceived?: boolean; expectedArrivalDate?: string; receivedDate?: string }) =>
+    update: (id: string, body: { isReceived?: boolean; expectedArrivalDate?: string; receivedDate?: string; poReference?: string }) =>
       api.patch<any>(`/vendor-parts/${id}`, body),
     delete: (id: string) => api.delete(`/vendor-parts/${id}`),
+
+    // One delivery note usually covers several parts arriving together.
+    bulkArrival: (vendorPartIds: string[], expectedArrivalDate?: string) =>
+      api.patch<{ updated: number }>('/vendor-parts/bulk-arrival', { vendorPartIds, expectedArrivalDate }),
+
+    listDocuments: (vendorPartId: string) =>
+      api.get<any[]>(`/vendor-parts/${vendorPartId}/documents`),
+
+    // Multipart upload. request() detects FormData and lets the browser set
+    // the Content-Type boundary, so this goes through the normal post path
+    // and keeps token refresh / preview-mode protection.
+    uploadDocument: async (vendorPartIds: string[], file: File, note?: string) => {
+      const form = new FormData();
+      form.append('file', file);
+      form.append('vendorPartIds', vendorPartIds.join(','));
+      if (note) form.append('note', note);
+      return api.post<any>('/vendor-parts/documents', form);
+    },
+
+    documentUrl: (documentId: string) => `/vendor-parts/documents/${documentId}/file`,
+
+    deleteDocument: (documentId: string) =>
+      api.delete(`/vendor-parts/documents/${documentId}`),
   },
 
   // ─── Production Tasks ────────────────────────────────────────────────────

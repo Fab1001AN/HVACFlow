@@ -124,6 +124,7 @@ model User {
   impersonationsMade      ImpersonationAudit[] @relation("ImpersonationAdmin")
   impersonationsReceived  ImpersonationAudit[] @relation("ImpersonationTarget")
   auditLogs               AuditLog[]           @relation("AuditActor")
+  vendorDocsUploaded      VendorPartDocument[] @relation("VendorDocUploader")
 
   @@map("users")
 }
@@ -566,6 +567,10 @@ model VendorPart {
   isReceived          Boolean   @default(false)
   expectedArrivalDate DateTime?
   receivedDate        DateTime?
+  // Supplier's purchase-order / reference number. Free text because every
+  // supplier formats theirs differently. Useful on its own for traceability,
+  // and it's what lets a delivery note be matched back to the right part.
+  poReference         String?
   addedByUserId       String
   createdAt           DateTime  @default(now())
   updatedAt           DateTime  @updatedAt
@@ -573,9 +578,53 @@ model VendorPart {
   unit          Unit     @relation(fields: [unitId], references: [id], onDelete: Cascade)
   partType      PartType @relation(fields: [partTypeId], references: [id])
   addedByUser   User     @relation(fields: [addedByUserId], references: [id])
+  documents     VendorPartDocumentLink[]
 
   @@index([unitId])
+  @@index([poReference])
   @@map("vendor_parts")
+}
+
+// A piece of supporting evidence for vendor deliveries - a photographed or
+// screenshotted delivery note, order confirmation, supplier email, etc.
+//
+// Stored as bytes IN THE DATABASE rather than on disk, deliberately: the
+// backup script dumps the database only, so filesystem uploads would be
+// silently missing from every backup. Keeping them here means proof is
+// covered by the existing backup/restore with no extra moving parts, and
+// there are no orphaned files to clean up. Delivery notes are small, so the
+// size cost is acceptable.
+model VendorPartDocument {
+  id             String   @id @default(uuid())
+  fileName       String
+  mimeType       String
+  sizeBytes      Int
+  data           Bytes
+  note           String?
+  uploadedById   String?
+  uploadedByName String   // snapshot, so the record survives user deletion
+  createdAt      DateTime @default(now())
+
+  uploadedBy   User?                    @relation("VendorDocUploader", fields: [uploadedById], references: [id], onDelete: SetNull)
+  vendorParts  VendorPartDocumentLink[]
+
+  @@index([createdAt])
+  @@map("vendor_part_documents")
+}
+
+// One delivery note often covers several parts, and a part can accumulate
+// several documents over time - so this is many-to-many rather than a single
+// foreign key.
+model VendorPartDocumentLink {
+  vendorPartId String
+  documentId   String
+
+  vendorPart VendorPart         @relation(fields: [vendorPartId], references: [id], onDelete: Cascade)
+  document   VendorPartDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@id([vendorPartId, documentId])
+  @@index([documentId])
+  @@map("vendor_part_document_links")
 }
 
 model Part {
